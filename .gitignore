@@ -1,0 +1,15 @@
+# claude-operator generated files
+CLAUDE.md
+.claude_mode
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Shell temp files
+*.tmp
