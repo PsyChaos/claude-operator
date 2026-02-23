@@ -4,7 +4,7 @@
 # Repo: https://github.com/PsyChaos/claude-operator
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/PsyChaos/claude-operator/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/PsyChaos/claude-operator/master/install.sh | bash
 #   bash install.sh [--version v1.2.3] [--global]
 #
 # Options:
@@ -14,7 +14,7 @@
 set -euo pipefail
 
 REPO="PsyChaos/claude-operator"
-BRANCH="main"
+BRANCH="master"
 RAW_BASE="https://raw.githubusercontent.com/$REPO/$BRANCH"
 RELEASES_BASE="https://github.com/$REPO/releases/download"
 
@@ -127,7 +127,7 @@ _download_file() {
     mv "$tmp_file" "$dest"
     rm -f "$tmp_sha"
   else
-    echo "  Downloading $filename from main branch (no checksum)..."
+    echo "  Downloading $filename from master branch (no checksum)..."
     curl -fsSL "$RAW_BASE/$filename" -o "$dest" || {
       echo "  Error: Failed to download $RAW_BASE/$filename"
       exit 1
@@ -146,7 +146,7 @@ if $GLOBAL_INSTALL; then
   echo "Installing claude-operator globally..."
   echo "  Destination: $GLOBAL_DEST"
   [[ -n "$VERSION" ]] && echo "  Version: $VERSION (checksum verification enabled)" \
-                      || echo "  Version: main tip (no checksum — pin with --version for security)"
+                      || echo "  Version: master tip (no checksum — pin with --version for security)"
   echo ""
 
   _download_file "operator.sh" "$GLOBAL_DEST"
@@ -185,7 +185,7 @@ fi
 
 echo "Installing claude-operator into: $INSTALL_DIR"
 [[ -n "$VERSION" ]] && echo "Version: $VERSION (checksum verification enabled)" \
-                    || echo "Version: main tip (no checksum — pin with --version for security)"
+                    || echo "Version: master tip (no checksum — pin with --version for security)"
 echo ""
 
 _download_file "operator.sh" "$INSTALL_DIR/operator.sh"

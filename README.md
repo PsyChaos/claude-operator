@@ -58,13 +58,13 @@ claude-operator/
 ### One-line install (latest, no checksum)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PsyChaos/claude-operator/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/PsyChaos/claude-operator/master/install.sh | bash
 ```
 
 ### Pinned install with checksum verification (recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PsyChaos/claude-operator/main/install.sh \
+curl -fsSL https://raw.githubusercontent.com/PsyChaos/claude-operator/master/install.sh \
   | bash -s -- --version v1.0.0
 ```
 
@@ -74,11 +74,11 @@ Downloads `operator.sh` from the GitHub Release and verifies its SHA256 checksum
 
 ```bash
 # Latest
-curl -fsSL https://raw.githubusercontent.com/PsyChaos/claude-operator/main/install.sh \
+curl -fsSL https://raw.githubusercontent.com/PsyChaos/claude-operator/master/install.sh \
   | bash -s -- --global
 
 # Pinned + verified (recommended)
-curl -fsSL https://raw.githubusercontent.com/PsyChaos/claude-operator/main/install.sh \
+curl -fsSL https://raw.githubusercontent.com/PsyChaos/claude-operator/master/install.sh \
   | bash -s -- --global --version v1.0.0
 ```
 

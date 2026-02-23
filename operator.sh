@@ -7,10 +7,10 @@
 set -euo pipefail
 
 # Version embedded at install time — used by `operator.sh update`
-OPERATOR_VERSION="main"
+OPERATOR_VERSION="master"
 
 REPO="PsyChaos/claude-operator"
-BRANCH="main"
+BRANCH="master"
 RAW_BASE="https://raw.githubusercontent.com/$REPO/$BRANCH"
 RELEASES_BASE="https://github.com/$REPO/releases/download"
 API_BASE="https://api.github.com/repos/$REPO"
