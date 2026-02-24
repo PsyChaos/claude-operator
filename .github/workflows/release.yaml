@@ -86,40 +86,27 @@ jobs:
           done
           echo "✅ Checksums and signatures generated"
 
-      - name: Collect release assets
+      - name: Stage release assets
         run: |
-          # Build file list dynamically — picks up any new profiles automatically
-          {
-            echo "operator.sh"
-            echo "operator.sh.sha256"
-            echo "operator.sh.sig"
-            echo "install.sh"
-            echo "install.sh.sha256"
-            echo "install.sh.sig"
-            echo "claude-operator.gpg.pub"
-            for f in profiles/*.md; do
-              echo "$f"
-              echo "$f.sha256"
-              echo "$f.sig"
-            done
-          } > /tmp/release-files.txt
-          echo "Release assets:"
-          cat /tmp/release-files.txt
+          # Copy all release assets into a flat staging dir — profiles auto-discovered
+          mkdir -p /tmp/release-assets
+          cp operator.sh operator.sh.sha256 operator.sh.sig \
+             install.sh  install.sh.sha256  install.sh.sig \
+             claude-operator.gpg.pub \
+             /tmp/release-assets/
+          for f in profiles/*.md; do
+            name="$(basename "$f")"
+            cp "$f"        /tmp/release-assets/"$name"
+            cp "$f.sha256" /tmp/release-assets/"$name.sha256"
+            cp "$f.sig"    /tmp/release-assets/"$name.sig"
+          done
+          echo "Staged assets:"
+          ls /tmp/release-assets/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: |
-            operator.sh
-            operator.sh.sha256
-            operator.sh.sig
-            install.sh
-            install.sh.sha256
-            install.sh.sig
-            claude-operator.gpg.pub
-            profiles/*.md
-            profiles/*.md.sha256
-            profiles/*.md.sig
+          files: /tmp/release-assets/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
