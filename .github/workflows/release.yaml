@@ -64,27 +64,30 @@ jobs:
 
       - name: Generate checksums and signatures
         run: |
+          set -euo pipefail
+
           # Checksums
           sha256sum operator.sh > operator.sh.sha256
           sha256sum install.sh  > install.sh.sha256
           for f in profiles/*.md; do
             sha256sum "$f" > "$f.sha256"
           done
+          echo "✅ Checksums generated"
 
-          # GPG signatures — loopback pinentry, passphrase from secret (empty if not set)
-          sign() {
+          # GPG signatures
+          for f in operator.sh install.sh profiles/*.md; do
+            echo "  Signing: $f"
             gpg --batch --yes \
                 --pinentry-mode loopback \
                 --passphrase "" \
                 --detach-sign --armor \
-                --local-user "$GPG_KEY_ID" "$1"
-          }
-          sign operator.sh
-          sign install.sh
-          for f in profiles/*.md; do
-            sign "$f"
+                --local-user "$GPG_KEY_ID" \
+                --output "${f}.sig" \
+                "$f"
+            echo "  ✅ ${f}.sig"
           done
-          echo "✅ Checksums and signatures generated"
+          echo "✅ All signatures generated"
+          ls -la *.sig profiles/*.sig 2>/dev/null || true
 
       - name: Stage release assets
         run: |
