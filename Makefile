@@ -3,8 +3,9 @@
 
 MODE ?= elite
 VERSION ?=
+ENTERPRISE_CONFIG ?=
 
-.PHONY: claude list current update install-global help
+.PHONY: claude list current update install-global enterprise-config audit-log enterprise-status help
 
 claude:
 	@if [ -n "$(VERSION)" ]; then \
@@ -36,6 +37,26 @@ update:
 install-global:
 	@bash install.sh --global
 
+enterprise-config:
+	@if [ -n "$(ENTERPRISE_CONFIG)" ]; then \
+		bash install.sh --enterprise --enterprise-config "$(ENTERPRISE_CONFIG)"; \
+	else \
+		bash install.sh --enterprise; \
+	fi
+
+audit-log:
+	@if [ -f "$${AUDIT_LOG:-/var/log/claude-operator.log}" ]; then \
+		cat "$${AUDIT_LOG:-/var/log/claude-operator.log}"; \
+	elif [ -f "$$HOME/.config/claude-operator/audit.log" ]; then \
+		cat "$$HOME/.config/claude-operator/audit.log"; \
+	else \
+		echo "No audit log found."; \
+		echo "Set AUDIT_LOG in your enterprise.conf to enable audit logging."; \
+	fi
+
+enterprise-status:
+	@./operator.sh enterprise-status
+
 help:
 	@echo ""
 	@echo "claude-operator commands:"
@@ -55,9 +76,19 @@ help:
 	@echo "  make install-global"
 	@echo "      → Install claude-operator to ~/.local/bin (global PATH access)"
 	@echo ""
+	@echo "  make enterprise-config [ENTERPRISE_CONFIG=/path/to/config]"
+	@echo "      → Generate enterprise config template"
+	@echo ""
+	@echo "  make enterprise-status"
+	@echo "      → Show current enterprise configuration"
+	@echo ""
+	@echo "  make audit-log"
+	@echo "      → Display the audit log"
+	@echo ""
 	@echo "Examples:"
 	@echo "  make claude MODE=elite"
 	@echo "  make claude MODE=elite VERSION=v1.0.0"
 	@echo "  bash install.sh --version v1.0.0          # pinned + checksum"
 	@echo "  bash install.sh --global --version v1.0.0  # global + checksum"
+	@echo "  bash install.sh --enterprise               # generate enterprise config"
 	@echo ""
