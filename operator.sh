@@ -1347,7 +1347,7 @@ _do_fetch_profile() {
     # Versioned fetch — verify against sidecar checksum
     local tmp_sha
     tmp_sha="$(mktemp /tmp/claude-operator-sha-XXXXXX)"
-    local sha_url="$RELEASES_BASE/$VERSION/profiles/$MODE.md.sha256"
+    local sha_url="$RELEASES_BASE/$VERSION/$MODE.md.sha256"
 
     echo "  Fetching profile checksum..."
     curl -fsSL "$sha_url" -o "$tmp_sha" || {
@@ -1370,7 +1370,7 @@ _do_fetch_profile() {
     if [[ "$VERIFY_SIG" == "true" ]]; then
       local tmp_profile_sig
       tmp_profile_sig="$(mktemp /tmp/claude-operator-profile-sig-XXXXXX)"
-      local profile_sig_url="$RELEASES_BASE/$VERSION/profiles/$MODE.md.sig"
+      local profile_sig_url="$RELEASES_BASE/$VERSION/$MODE.md.sig"
       echo "  Fetching profile GPG signature..."
       curl -fsSL "$profile_sig_url" -o "$tmp_profile_sig" || {
         rm -f "$tmp_profile" "$tmp_profile_sig"
