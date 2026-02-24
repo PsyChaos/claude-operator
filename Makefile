@@ -4,7 +4,7 @@
 MODE ?= elite
 VERSION ?=
 
-.PHONY: claude list current update install-global help
+.PHONY: claude list current update install-global help plugin-add plugin-list plugin-remove plugin-update
 
 claude:
 	@if [ -n "$(VERSION)" ]; then \
@@ -36,6 +36,36 @@ update:
 install-global:
 	@bash install.sh --global
 
+REGISTRY ?=
+
+plugin-add:
+	@if [ -z "$(REGISTRY)" ]; then \
+		echo "Usage: make plugin-add REGISTRY=owner/repo [VERSION=vX.Y.Z]"; \
+		exit 1; \
+	fi
+	@if [ -n "$(VERSION)" ]; then \
+		./operator.sh plugin add $(REGISTRY) $(VERSION); \
+	else \
+		./operator.sh plugin add $(REGISTRY); \
+	fi
+
+plugin-list:
+	@./operator.sh plugin list
+
+plugin-remove:
+	@if [ -z "$(REGISTRY)" ]; then \
+		echo "Usage: make plugin-remove REGISTRY=owner/repo"; \
+		exit 1; \
+	fi
+	@./operator.sh plugin remove $(REGISTRY)
+
+plugin-update:
+	@if [ -n "$(REGISTRY)" ]; then \
+		./operator.sh plugin update $(REGISTRY); \
+	else \
+		./operator.sh plugin update; \
+	fi
+
 help:
 	@echo ""
 	@echo "claude-operator commands:"
@@ -54,6 +84,18 @@ help:
 	@echo ""
 	@echo "  make install-global"
 	@echo "      → Install claude-operator to ~/.local/bin (global PATH access)"
+	@echo ""
+	@echo "  make plugin-add REGISTRY=owner/repo [VERSION=vX.Y.Z]"
+	@echo "      → Add a plugin registry (GitHub repo with profiles/)"
+	@echo ""
+	@echo "  make plugin-list"
+	@echo "      → List all available profiles (core + plugins + local)"
+	@echo ""
+	@echo "  make plugin-remove REGISTRY=owner/repo"
+	@echo "      → Remove a plugin registry"
+	@echo ""
+	@echo "  make plugin-update [REGISTRY=owner/repo]"
+	@echo "      → Update plugin profiles (all or specific registry)"
 	@echo ""
 	@echo "Examples:"
 	@echo "  make claude MODE=elite"
