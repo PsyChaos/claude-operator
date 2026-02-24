@@ -676,10 +676,24 @@ _do_update() {
 
   # Fetch latest release metadata (no jq required)
   local release_json
-  release_json=$(curl -fsSL "$API_BASE/releases/latest") || {
-    echo "Error: Failed to reach GitHub API. Check your internet connection."
+  local http_code
+  release_json=$(curl -fsSL --write-out "\n__HTTP_CODE__:%{http_code}" "$API_BASE/releases/latest" 2>/dev/null) || true
+  http_code=$(printf '%s' "$release_json" | grep -o '__HTTP_CODE__:[0-9]*' | cut -d: -f2)
+  release_json=$(printf '%s' "$release_json" | grep -v '__HTTP_CODE__:')
+
+  if [[ "$http_code" == "404" ]]; then
+    echo "No GitHub releases found for this repository."
+    echo "The repository has no published releases yet."
+    echo ""
+    echo "To create the first release, push a version tag:"
+    echo "  git tag v1.0.0 && git push origin v1.0.0"
+    exit 0
+  fi
+
+  if [[ -z "$release_json" || "$http_code" != "200" ]]; then
+    echo "Error: Failed to reach GitHub API (HTTP $http_code). Check your internet connection."
     exit 1
-  }
+  fi
 
   local latest_tag
   latest_tag=$(printf '%s' "$release_json" \
