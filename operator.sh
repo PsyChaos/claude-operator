@@ -56,6 +56,18 @@ PROFILE_REGISTRY_URL=""
 UPDATE_POLICY="auto"
 OFFLINE_MODE=false
 
+# ─── Conflict resolution ──────────────────────────────────────────────────────
+
+# Backup dir and sentinel constants
+BACKUP_DIR="$(pwd)/.claude_backup"
+SENTINEL_BEGIN="<!-- claude-operator:begin"
+SENTINEL_END="<!-- claude-operator:end -->"
+MAX_BACKUPS=5
+
+# Conflict resolution mode: prompt | backup | merge | force
+# Can be overridden via env var CLAUDE_OPERATOR_CONFLICT
+CONFLICT_MODE="${CLAUDE_OPERATOR_CONFLICT:-prompt}"
+
 # ─── Argument parsing ─────────────────────────────────────────────────────────
 
 while [[ "${1:-}" == --* ]]; do
@@ -68,6 +80,18 @@ while [[ "${1:-}" == --* ]]; do
       VERIFY_SIG=true
       shift
       ;;
+    --force)
+      CONFLICT_MODE="force"
+      shift
+      ;;
+    --backup)
+      CONFLICT_MODE="backup"
+      shift
+      ;;
+    --merge)
+      CONFLICT_MODE="merge"
+      shift
+      ;;
     *)
       break
       ;;
@@ -78,23 +102,31 @@ MODE="${1:-}"
 VERSION="${2:-}"
 
 if [ -z "$MODE" ]; then
-  echo "Usage: ./operator.sh [--strict-checksum] [--verify-sig] <mode> [version]"
+  echo "Usage: ./operator.sh [flags] <mode> [version]"
   echo "       ./operator.sh update"
+  echo "       ./operator.sh restore [--list] [timestamp]"
   echo "       ./operator.sh plugin <add|list|remove|update> [registry] [version]"
   echo "       ./operator.sh trust-key"
   echo "       ./operator.sh enterprise-status"
   echo ""
+  echo "Flags:"
+  echo "  --strict-checksum   Hard fail if no sha256 tool found"
+  echo "  --verify-sig        Verify GPG signature of downloaded files"
+  echo "  --force             Overwrite CLAUDE.md without prompting"
+  echo "  --backup            Backup existing CLAUDE.md then overwrite (non-interactive)"
+  echo "  --merge             Append profile below existing content using sentinels (opt-in)"
+  echo ""
   echo "Examples:"
   echo "  ./operator.sh elite"
   echo "  ./operator.sh elite v1.0.0"
-  echo "  ./operator.sh --strict-checksum elite v1.0.0"
-  echo "  ./operator.sh --verify-sig elite v1.0.0"
+  echo "  ./operator.sh --merge elite v1.0.0"
+  echo "  ./operator.sh --backup elite v1.0.0"
+  echo "  ./operator.sh --force elite v1.0.0"
+  echo "  ./operator.sh restore"
+  echo "  ./operator.sh restore --list"
   echo "  ./operator.sh update"
   echo "  ./operator.sh plugin add myorg/my-profiles"
-  echo "  ./operator.sh plugin add myorg/my-profiles v1.0.0"
   echo "  ./operator.sh plugin list"
-  echo "  ./operator.sh plugin remove myorg/my-profiles"
-  echo "  ./operator.sh plugin update"
   echo "  ./operator.sh trust-key"
   echo "  ./operator.sh enterprise-status"
   exit 1
@@ -146,6 +178,334 @@ _verify_checksum() {
     echo "    Got:      $actual_hash"
     return 1
   fi
+}
+
+# ─── Conflict detection & resolution ─────────────────────────────────────────
+
+# Returns 0 if CLAUDE.md is managed by claude-operator, 1 if unmanaged/absent
+_is_operator_managed() {
+  # Not present at all → not a conflict
+  [[ ! -f "$TARGET_FILE" ]] && return 0
+  # Has operator sentinel header → managed
+  grep -q "^$SENTINEL_BEGIN" "$TARGET_FILE" 2>/dev/null && return 0
+  # Has .claude_mode state file → managed
+  [[ -f "$MODE_FILE" ]] && return 0
+  # Exists but no evidence of operator ownership → unmanaged
+  return 1
+}
+
+# Ensure .claude_backup/ is in .gitignore
+_ensure_gitignore() {
+  local gitignore="$(pwd)/.gitignore"
+  local entry=".claude_backup/"
+  if [[ -f "$gitignore" ]]; then
+    if ! grep -qF "$entry" "$gitignore" 2>/dev/null; then
+      printf '\n# claude-operator backups\n%s\n' "$entry" >> "$gitignore"
+      echo "  Note: Added $entry to .gitignore" >&2
+    fi
+  else
+    printf '# claude-operator backups\n%s\n' "$entry" > "$gitignore"
+    echo "  Note: Created .gitignore with $entry" >&2
+  fi
+}
+
+# Rotate backups — keep at most MAX_BACKUPS, remove oldest first
+_rotate_backups() {
+  [[ ! -d "$BACKUP_DIR" ]] && return 0
+  local count
+  count=$(ls -1 "$BACKUP_DIR"/CLAUDE.md.* 2>/dev/null | wc -l)
+  if [[ "$count" -ge "$MAX_BACKUPS" ]]; then
+    local to_delete=$(( count - MAX_BACKUPS + 1 ))
+    ls -1t "$BACKUP_DIR"/CLAUDE.md.* 2>/dev/null | tail -n "$to_delete" | while IFS= read -r f; do
+      rm -f "$f"
+    done
+  fi
+}
+
+# Backup existing CLAUDE.md to .claude_backup/<timestamp>
+_backup_existing() {
+  [[ ! -f "$TARGET_FILE" ]] && return 0
+  _ensure_gitignore
+  mkdir -p "$BACKUP_DIR"
+  _rotate_backups
+  local ts
+  ts=$(date -u +"%Y%m%dT%H%M%SZ")
+  local dest="$BACKUP_DIR/CLAUDE.md.$ts"
+  cp "$TARGET_FILE" "$dest"
+  echo "  Backed up: $dest" >&2
+}
+
+# Apply profile via merge/composition (sentinel-based)
+# $1 = path to downloaded profile tmp file
+# $2 = mode@ref label for sentinel
+_apply_merge() {
+  local profile_tmp="$1"
+  local label="$2"
+
+  local begin_line="$SENTINEL_BEGIN $label -->"
+  local end_line="$SENTINEL_END"
+
+  if [[ ! -f "$TARGET_FILE" ]]; then
+    # No existing file — write with sentinel wrapper
+    {
+      printf '%s\n' "$begin_line"
+      cat "$profile_tmp"
+      printf '%s\n' "$end_line"
+    } > "$TARGET_FILE"
+    echo "  Created CLAUDE.md with operator section." >&2
+    return 0
+  fi
+
+  if grep -q "^$SENTINEL_BEGIN" "$TARGET_FILE" 2>/dev/null; then
+    # Sentinel exists — replace the operator section in-place
+    local tmp_merged
+    tmp_merged="$(mktemp /tmp/claude-operator-merge-XXXXXX)"
+    local in_sentinel=false
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      if [[ "$line" == $SENTINEL_BEGIN* ]]; then
+        in_sentinel=true
+        # Write new begin sentinel + new content
+        printf '%s\n' "$begin_line" >> "$tmp_merged"
+        cat "$profile_tmp" >> "$tmp_merged"
+        printf '%s\n' "$end_line" >> "$tmp_merged"
+        continue
+      fi
+      if [[ "$line" == "$SENTINEL_END" ]]; then
+        in_sentinel=false
+        continue
+      fi
+      [[ "$in_sentinel" == "false" ]] && printf '%s\n' "$line" >> "$tmp_merged"
+    done < "$TARGET_FILE"
+    mv "$tmp_merged" "$TARGET_FILE"
+    echo "  Updated operator section in CLAUDE.md (project content preserved)." >&2
+  else
+    # No sentinel yet — append operator section below existing content
+    {
+      echo ""
+      echo "---"
+      echo ""
+      printf '%s\n' "$begin_line"
+      cat "$profile_tmp"
+      printf '%s\n' "$end_line"
+    } >> "$TARGET_FILE"
+    echo "  Appended operator section to existing CLAUDE.md." >&2
+  fi
+}
+
+# Remove sentinel block from CLAUDE.md (restore project-only content)
+_remove_sentinel() {
+  [[ ! -f "$TARGET_FILE" ]] && return 0
+  if ! grep -q "^$SENTINEL_BEGIN" "$TARGET_FILE" 2>/dev/null; then
+    echo "  No operator sentinel found in CLAUDE.md — nothing to remove."
+    return 0
+  fi
+  local tmp_stripped
+  tmp_stripped="$(mktemp /tmp/claude-operator-stripped-XXXXXX)"
+  local in_sentinel=false
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" == $SENTINEL_BEGIN* ]]; then
+      in_sentinel=true
+      continue
+    fi
+    if [[ "$line" == "$SENTINEL_END" ]]; then
+      in_sentinel=false
+      continue
+    fi
+    [[ "$in_sentinel" == "false" ]] && printf '%s\n' "$line" >> "$tmp_stripped"
+  done < "$TARGET_FILE"
+  # Strip trailing blank lines left by sentinel removal
+  sed -i 's/[[:space:]]*$//' "$tmp_stripped"
+  mv "$tmp_stripped" "$TARGET_FILE"
+  echo "  Operator section removed. Project content preserved."
+}
+
+# Interactive conflict prompt — returns chosen action: backup|merge|force|abort
+_prompt_conflict() {
+  echo "" >&2
+  echo "Warning: CLAUDE.md exists and is not managed by claude-operator." >&2
+  echo "" >&2
+  echo "  [b] Backup & overwrite  — save to .claude_backup/, apply profile  (default)" >&2
+  echo "  [m] Merge               — keep project content, append profile below" >&2
+  echo "  [o] Overwrite           — replace entirely (current content will be lost)" >&2
+  echo "  [a] Abort               — do nothing" >&2
+  echo "" >&2
+
+  local choice=""
+  local timeout=10
+  if read -r -t "$timeout" -p "Choice [b/m/o/a] (default: b, auto-selects in ${timeout}s): " choice 2>/dev/null; then
+    : # got input
+  else
+    echo "" >&2
+    echo "  Timeout — defaulting to: backup" >&2
+    choice="b"
+  fi
+
+  case "${choice,,}" in
+    m) printf 'merge'  ;;
+    o) printf 'force'  ;;
+    a) printf 'abort'  ;;
+    *) printf 'backup' ;;  # b or empty or anything else
+  esac
+}
+
+# Main conflict resolver — decides what to do when unmanaged CLAUDE.md exists
+# $1 = profile tmp file path, $2 = mode@ref label
+# Returns: writes to TARGET_FILE using the chosen strategy
+_resolve_conflict() {
+  local profile_tmp="$1"
+  local label="$2"
+  local action="$CONFLICT_MODE"
+
+  # If not interactive terminal and mode is still "prompt", default to backup
+  if [[ "$action" == "prompt" ]] && [[ ! -t 0 ]]; then
+    echo "  Non-interactive mode — defaulting to: backup" >&2
+    action="backup"
+  fi
+
+  # Interactive prompt
+  if [[ "$action" == "prompt" ]]; then
+    action=$(_prompt_conflict)
+  fi
+
+  case "$action" in
+    abort)
+      echo "" >&2
+      echo "Aborted. CLAUDE.md was not modified." >&2
+      exit 0
+      ;;
+    backup)
+      _backup_existing
+      mv "$profile_tmp" "$TARGET_FILE"
+      printf 'backup'
+      ;;
+    merge)
+      _apply_merge "$profile_tmp" "$label"
+      rm -f "$profile_tmp"
+      printf 'merge'
+      ;;
+    force)
+      mv "$profile_tmp" "$TARGET_FILE"
+      printf 'force'
+      ;;
+    *)
+      # Fallback — should not happen
+      mv "$profile_tmp" "$TARGET_FILE"
+      printf 'force'
+      ;;
+  esac
+}
+
+# ─── Restore ──────────────────────────────────────────────────────────────────
+
+_do_restore() {
+  local list_mode=false
+  local target_ts=""
+
+  # Parse restore sub-args
+  local restore_arg="${2:-}"
+  local restore_arg2="${3:-}"
+  if [[ "$restore_arg" == "--list" ]]; then
+    list_mode=true
+  elif [[ -n "$restore_arg" ]]; then
+    target_ts="$restore_arg"
+  fi
+
+  # --list: show available backups
+  if [[ "$list_mode" == "true" ]]; then
+    echo "Available backups:"
+    if [[ -d "$BACKUP_DIR" ]] && ls "$BACKUP_DIR"/CLAUDE.md.* &>/dev/null; then
+      ls -1t "$BACKUP_DIR"/CLAUDE.md.* | while IFS= read -r f; do
+        local ts
+        ts="$(basename "$f" | sed 's/CLAUDE\.md\.//')"
+        echo "  $ts"
+      done
+    else
+      echo "  (none)"
+    fi
+    return 0
+  fi
+
+  # Determine what write_mode was used (from .claude_mode)
+  local write_mode="overwrite"
+  if [[ -f "$MODE_FILE" ]]; then
+    local mode_entry
+    mode_entry="$(cat "$MODE_FILE")"
+    if [[ "$mode_entry" == *:* ]]; then
+      write_mode="${mode_entry##*:}"
+    fi
+  fi
+
+  local has_sentinel=false
+  local has_backup=false
+
+  grep -q "^$SENTINEL_BEGIN" "$TARGET_FILE" 2>/dev/null && has_sentinel=true
+  [[ -d "$BACKUP_DIR" ]] && ls "$BACKUP_DIR"/CLAUDE.md.* &>/dev/null && has_backup=true
+
+  # Determine action based on what's available and write_mode
+  local action=""
+
+  if [[ "$write_mode" == "merge" && "$has_backup" == "false" ]]; then
+    action="sentinel"
+  elif [[ "$write_mode" == "backup" && "$has_sentinel" == "false" ]]; then
+    action="backup"
+  elif [[ "$write_mode" == "merge+backup" ]] || \
+       ( [[ "$has_sentinel" == "true" ]] && [[ "$has_backup" == "true" ]] ); then
+    # Both available — ask
+    echo ""
+    echo "Both a sentinel section and a backup are available."
+    echo ""
+    echo "  [s] Remove sentinel   — keep project content, strip operator section"
+    echo "  [b] From backup       — restore last backup"
+    echo "  [a] Abort"
+    echo ""
+    local choice=""
+    read -r -p "Choice [s/b/a] (default: s): " choice 2>/dev/null || choice="s"
+    case "${choice,,}" in
+      b) action="backup" ;;
+      a) echo "Aborted."; return 0 ;;
+      *) action="sentinel" ;;
+    esac
+  elif [[ "$has_sentinel" == "true" ]]; then
+    action="sentinel"
+  elif [[ "$has_backup" == "true" ]]; then
+    action="backup"
+  else
+    echo "Nothing to restore. No backup or sentinel found."
+    return 0
+  fi
+
+  # Execute restore action
+  if [[ "$action" == "sentinel" ]]; then
+    echo "Removing operator sentinel section..."
+    _remove_sentinel
+  elif [[ "$action" == "backup" ]]; then
+    local backup_file=""
+    if [[ -n "$target_ts" ]]; then
+      backup_file="$BACKUP_DIR/CLAUDE.md.$target_ts"
+      if [[ ! -f "$backup_file" ]]; then
+        echo "Error: No backup found for timestamp '$target_ts'"
+        echo "Run: ./operator.sh restore --list"
+        exit 1
+      fi
+    else
+      backup_file=$(ls -1t "$BACKUP_DIR"/CLAUDE.md.* 2>/dev/null | head -1)
+      if [[ -z "$backup_file" ]]; then
+        echo "Error: No backups found in $BACKUP_DIR"
+        exit 1
+      fi
+    fi
+    cp "$backup_file" "$TARGET_FILE"
+    echo "  Restored from: $(basename "$backup_file")"
+  fi
+
+  # Clear mode file
+  rm -f "$MODE_FILE"
+
+  echo ""
+  echo "========================================"
+  echo " CLAUDE.md restored successfully"
+  echo "========================================"
+  echo ""
 }
 
 # ─── GPG helpers ─────────────────────────────────────────────────────────────
@@ -741,6 +1101,13 @@ fi
 _load_enterprise_config
 _enforce_enterprise_policies
 
+# ─── Restore branch ──────────────────────────────────────────────────────────
+
+if [[ "$MODE" == "restore" ]]; then
+  _do_restore "$@"
+  exit 0
+fi
+
 # ─── Update branch ────────────────────────────────────────────────────────────
 
 if [[ "$MODE" == "update" ]]; then
@@ -889,17 +1256,44 @@ _do_fetch_profile() {
     echo "        For supply-chain security, use: ./operator.sh <mode> vX.Y.Z"
   fi
 
-  mv "$tmp_profile" "$TARGET_FILE"
+  # ─── Conflict detection & write ──────────────────────────────────────────────
+
+  local label="$MODE@$ref"
+  local write_mode="overwrite"
+
+  if _is_operator_managed; then
+    # Managed by operator — apply directly (or honour --merge flag)
+    if [[ "$CONFLICT_MODE" == "merge" ]]; then
+      _apply_merge "$tmp_profile" "$label"
+      rm -f "$tmp_profile"
+      write_mode="merge"
+    else
+      mv "$tmp_profile" "$TARGET_FILE"
+      write_mode="overwrite"
+    fi
+  else
+    # Unmanaged CLAUDE.md exists — run conflict resolution flow
+    echo ""
+    local resolved_action
+    resolved_action=$(_resolve_conflict "$tmp_profile" "$label")
+    write_mode="$resolved_action"
+
+    # If merge was chosen via prompt, _apply_merge already wrote the file
+    # and tmp was removed inside _resolve_conflict. If backup/force, mv was done.
+    # In all cases tmp_profile is handled.
+  fi
+
+  # Record write_mode in .claude_mode
+  echo "$label:$write_mode" > "$MODE_FILE"
 
   # Cache the successfully fetched profile
   _cache_profile "$MODE" "$ref" "$TARGET_FILE"
-
-  echo "$MODE@$ref" > "$MODE_FILE"
 
   echo ""
   echo "========================================"
   echo " Active Claude Mode: $MODE"
   echo " Version/Ref: $ref"
+  echo " Write mode: $write_mode"
   echo " CLAUDE.md updated successfully"
   echo "========================================"
   echo ""
