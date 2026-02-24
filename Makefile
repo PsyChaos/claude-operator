@@ -9,6 +9,11 @@ CONFLICT ?=
 .PHONY: claude list current update install-global restore restore-list help plugin-add plugin-list plugin-remove plugin-update enterprise-config audit-log enterprise-status
 
 claude:
+	@if [ -n "$(Mode)" ] || [ -n "$(mode)" ]; then \
+		echo "Error: Use uppercase MODE=, not Mode= or mode="; \
+		echo "  make claude MODE=$(or $(Mode),$(mode))"; \
+		exit 1; \
+	fi
 	@flags=""; \
 	[ "$(CONFLICT)" = "merge" ]  && flags="--merge"; \
 	[ "$(CONFLICT)" = "force" ]  && flags="--force"; \

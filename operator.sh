@@ -1254,8 +1254,15 @@ _do_fetch_profile() {
 
   curl -fsSL "$profile_url" -o "$tmp_profile" || {
     rm -f "$tmp_profile"
-    echo "Error: Failed to fetch profile '$MODE' (ref: $ref)"
-    echo "Check that the profile name is valid and the version tag exists."
+    echo ""
+    echo "Error: Profile '$MODE' not found."
+    echo ""
+    echo "Available core profiles:"
+    echo "  elite"
+    echo "  high-autonomy"
+    echo "  senior-production"
+    echo ""
+    echo "Run './operator.sh plugin list' to see all profiles including plugins and local overrides."
     exit 1
   }
 
