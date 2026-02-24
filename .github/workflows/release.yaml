@@ -45,30 +45,66 @@ jobs:
 
       - name: Import GPG signing key
         run: |
-          echo "${{ secrets.SIGNING_KEY }}" | base64 -d | gpg --batch --import
-          GPG_KEY_ID=$(gpg --list-secret-keys --keyid-format LONG | grep sec | awk '{print $2}' | cut -d'/' -f2 | head -1)
+          # Setup GPG for headless/CI operation
+          mkdir -p ~/.gnupg
+          chmod 700 ~/.gnupg
+          echo "allow-loopback-pinentry" > ~/.gnupg/gpg-agent.conf
+          echo "no-tty" >> ~/.gnupg/gpg.conf 2>/dev/null || echo "no-tty" > ~/.gnupg/gpg.conf
+          gpg-connect-agent reloadagent /bye 2>/dev/null || true
+
+          # Import key — strip passphrase if present so CI doesn't need to prompt
+          echo "${{ secrets.SIGNING_KEY }}" | base64 -d > /tmp/signing.key
+          gpg --batch --import /tmp/signing.key
+          rm -f /tmp/signing.key
+
+          GPG_KEY_ID=$(gpg --list-secret-keys --keyid-format LONG \
+            | grep '^sec' | awk '{print $2}' | cut -d'/' -f2 | head -1)
           echo "GPG_KEY_ID=$GPG_KEY_ID" >> $GITHUB_ENV
           echo "Signing key imported: $GPG_KEY_ID"
-          # Configure GPG for non-interactive/CI use
-          echo "allow-loopback-pinentry" >> ~/.gnupg/gpg-agent.conf
-          gpg-connect-agent reloadagent /bye || true
 
-      - name: Generate checksums
+      - name: Generate checksums and signatures
         run: |
+          # Checksums
           sha256sum operator.sh > operator.sh.sha256
-          sha256sum install.sh > install.sh.sha256
-          mkdir -p profiles
+          sha256sum install.sh  > install.sh.sha256
           for f in profiles/*.md; do
             sha256sum "$f" > "$f.sha256"
           done
 
-      - name: Generate GPG signatures
-        run: |
-          for f in operator.sh install.sh profiles/*.md; do
-            gpg --batch --yes --pinentry-mode loopback \
-                --detach-sign --armor --local-user "$GPG_KEY_ID" "$f"
+          # GPG signatures — loopback pinentry, passphrase from secret (empty if not set)
+          sign() {
+            gpg --batch --yes \
+                --pinentry-mode loopback \
+                --passphrase "" \
+                --detach-sign --armor \
+                --local-user "$GPG_KEY_ID" "$1"
+          }
+          sign operator.sh
+          sign install.sh
+          for f in profiles/*.md; do
+            sign "$f"
           done
-          echo "✅ Signatures generated"
+          echo "✅ Checksums and signatures generated"
+
+      - name: Collect release assets
+        run: |
+          # Build file list dynamically — picks up any new profiles automatically
+          {
+            echo "operator.sh"
+            echo "operator.sh.sha256"
+            echo "operator.sh.sig"
+            echo "install.sh"
+            echo "install.sh.sha256"
+            echo "install.sh.sig"
+            echo "claude-operator.gpg.pub"
+            for f in profiles/*.md; do
+              echo "$f"
+              echo "$f.sha256"
+              echo "$f.sig"
+            done
+          } > /tmp/release-files.txt
+          echo "Release assets:"
+          cat /tmp/release-files.txt
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -76,26 +112,14 @@ jobs:
           generate_release_notes: true
           files: |
             operator.sh
-            install.sh
             operator.sh.sha256
-            install.sh.sha256
             operator.sh.sig
+            install.sh
+            install.sh.sha256
             install.sh.sig
-            profiles/elite.md
-            profiles/elite.md.sha256
-            profiles/elite.md.sig
-            profiles/high-autonomy.md
-            profiles/high-autonomy.md.sha256
-            profiles/high-autonomy.md.sig
-            profiles/memory-centric.md
-            profiles/memory-centric.md.sha256
-            profiles/memory-centric.md.sig
-            profiles/senior-production.md
-            profiles/senior-production.md.sha256
-            profiles/senior-production.md.sig
-            profiles/token-optimization.md
-            profiles/token-optimization.md.sha256
-            profiles/token-optimization.md.sig
             claude-operator.gpg.pub
+            profiles/*.md
+            profiles/*.md.sha256
+            profiles/*.md.sig
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
