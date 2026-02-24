@@ -65,6 +65,16 @@ claude-operator/
 
 ## Installation
 
+`install.sh` is for setting up `operator.sh` without cloning this repository. If you have
+already cloned the repo, use `./operator.sh` and `make` directly — `install.sh` is not needed.
+
+| Situation | Method |
+|-----------|--------|
+| Repo already cloned | Use `./operator.sh` / `make` directly |
+| Another project, no clone | `curl ... install.sh \| bash` |
+| CI/CD pipeline | `curl ... install.sh \| bash -s -- --version v1.0.0` |
+| Global PATH install | `curl ... install.sh \| bash -s -- --global` |
+
 ### One-line install (latest, no checksum)
 
 ```bash
@@ -153,8 +163,10 @@ GitHub Release.
 
 ### Runtime flags
 
+Flags can appear in any position — before or after `<mode>` and `[version]`:
+
 ```
-./operator.sh [--strict-checksum] [--verify-sig] [--force|--backup|--merge] <mode> [version]
+./operator.sh [flags] <mode> [version] [flags]
 ```
 
 | Flag | Description |
@@ -189,6 +201,8 @@ claude-operator update         # after global install
 Queries the GitHub Releases API, compares the current version, downloads the new binary,
 verifies its SHA256 checksum (and GPG signature if `--verify-sig` is set), and atomically
 replaces itself. No manual steps required.
+
+If no releases have been published yet, exits cleanly with `Already up to date.`
 
 ---
 
