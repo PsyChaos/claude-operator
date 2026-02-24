@@ -682,11 +682,7 @@ _do_update() {
   release_json=$(printf '%s' "$release_json" | grep -v '__HTTP_CODE__:')
 
   if [[ "$http_code" == "404" ]]; then
-    echo "No GitHub releases found for this repository."
-    echo "The repository has no published releases yet."
-    echo ""
-    echo "To create the first release, push a version tag:"
-    echo "  git tag v1.0.0 && git push origin v1.0.0"
+    echo "Already up to date. No releases published yet."
     exit 0
   fi
 
