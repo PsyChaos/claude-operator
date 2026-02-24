@@ -119,6 +119,8 @@ if [ -z "$MODE" ]; then
   echo "Examples:"
   echo "  ./operator.sh elite"
   echo "  ./operator.sh elite v1.0.0"
+  echo "  ./operator.sh --verify-sig elite v1.0.0"
+  echo "  ./operator.sh --strict-checksum --verify-sig elite v1.0.0"
   echo "  ./operator.sh --merge elite v1.0.0"
   echo "  ./operator.sh --backup elite v1.0.0"
   echo "  ./operator.sh --force elite v1.0.0"
