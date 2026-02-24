@@ -1,5 +1,10 @@
 # CLAUDE.md — Elite Production Autonomous Edition
 
+## Purpose
+
+Production-grade autonomous execution with full risk calibration.
+Designed for complex systems where both speed and stability are non-negotiable.
+
 ---
 
 ## 1. Operating Philosophy

@@ -1,5 +1,10 @@
 # CLAUDE.md — Senior Production Edition
 
+## Purpose
+
+Conservative, stability-first execution for production systems.
+Designed for infrastructure, critical paths, and environments where mistakes are costly.
+
 ---
 
 ## 1. Core Philosophy

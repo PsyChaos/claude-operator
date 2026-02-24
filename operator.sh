@@ -1307,9 +1307,18 @@ _do_fetch_profile() {
     echo "Error: Profile '$MODE' not found."
     echo ""
     echo "Available core profiles:"
-    echo "  elite"
-    echo "  high-autonomy"
-    echo "  senior-production"
+    # Try to list from local profiles/ dir first, fall back to known list
+    local profiles_dir
+    profiles_dir="$(dirname "$0")/profiles"
+    if [[ -d "$profiles_dir" ]]; then
+      ls "$profiles_dir"/*.md 2>/dev/null | sed 's|.*/||;s|\.md$||' | sed 's/^/  /' || true
+    else
+      echo "  elite"
+      echo "  high-autonomy"
+      echo "  memory-centric"
+      echo "  senior-production"
+      echo "  token-optimization"
+    fi
     echo ""
     echo "Run './operator.sh plugin list' to see all profiles including plugins and local overrides."
     exit 1

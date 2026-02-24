@@ -1,5 +1,10 @@
 # CLAUDE.md — High Autonomy AI Agent Edition
 
+## Purpose
+
+Maximum autonomy with minimal user interruption.
+Designed for rapid iteration, agentic workflows, and tasks where forward progress matters most.
+
 ---
 
 ## 1. Mission

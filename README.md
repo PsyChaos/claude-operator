@@ -51,9 +51,11 @@ policy enforcement — all in pure Bash with no dependencies beyond `curl` and s
 ```
 claude-operator/
 ├── profiles/
-│   ├── senior-production.md
+│   ├── elite.md
 │   ├── high-autonomy.md
-│   └── elite.md
+│   ├── memory-centric.md
+│   ├── senior-production.md
+│   └── token-optimization.md
 ├── operator.sh
 ├── install.sh
 ├── Makefile
@@ -183,6 +185,14 @@ Flags can appear in any position — before or after `<mode>` and `[version]`:
 make list
 ./operator.sh plugin list      # includes plugin + local profiles
 ```
+
+| Profile | Purpose |
+|---------|---------|
+| `elite` | Production-grade autonomous execution with full risk calibration |
+| `high-autonomy` | Maximum autonomy, minimal interruption, rapid iteration |
+| `memory-centric` | Long-term coherence, architectural continuity, cross-session reasoning |
+| `senior-production` | Conservative, stability-first execution for critical systems |
+| `token-optimization` | Minimal token usage, deterministic output, CI/cost-sensitive environments |
 
 ### Show current mode
 
@@ -343,7 +353,9 @@ make plugin-list
 Core profiles (PsyChaos/claude-operator):
   elite
   high-autonomy
+  memory-centric
   senior-production
+  token-optimization
 
 Plugin: myorg/my-profiles
   fast
