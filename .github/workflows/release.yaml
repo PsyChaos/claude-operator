@@ -49,6 +49,9 @@ jobs:
           GPG_KEY_ID=$(gpg --list-secret-keys --keyid-format LONG | grep sec | awk '{print $2}' | cut -d'/' -f2 | head -1)
           echo "GPG_KEY_ID=$GPG_KEY_ID" >> $GITHUB_ENV
           echo "Signing key imported: $GPG_KEY_ID"
+          # Configure GPG for non-interactive/CI use
+          echo "allow-loopback-pinentry" >> ~/.gnupg/gpg-agent.conf
+          gpg-connect-agent reloadagent /bye || true
 
       - name: Generate checksums
         run: |
@@ -61,10 +64,9 @@ jobs:
 
       - name: Generate GPG signatures
         run: |
-          gpg --batch --yes --detach-sign --armor --local-user "$GPG_KEY_ID" operator.sh
-          gpg --batch --yes --detach-sign --armor --local-user "$GPG_KEY_ID" install.sh
-          for f in profiles/*.md; do
-            gpg --batch --yes --detach-sign --armor --local-user "$GPG_KEY_ID" "$f"
+          for f in operator.sh install.sh profiles/*.md; do
+            gpg --batch --yes --pinentry-mode loopback \
+                --detach-sign --armor --local-user "$GPG_KEY_ID" "$f"
           done
           echo "✅ Signatures generated"
 
@@ -79,12 +81,21 @@ jobs:
             install.sh.sha256
             operator.sh.sig
             install.sh.sig
+            profiles/elite.md
             profiles/elite.md.sha256
-            profiles/high-autonomy.md.sha256
-            profiles/senior-production.md.sha256
             profiles/elite.md.sig
+            profiles/high-autonomy.md
+            profiles/high-autonomy.md.sha256
             profiles/high-autonomy.md.sig
+            profiles/memory-centric.md
+            profiles/memory-centric.md.sha256
+            profiles/memory-centric.md.sig
+            profiles/senior-production.md
+            profiles/senior-production.md.sha256
             profiles/senior-production.md.sig
+            profiles/token-optimization.md
+            profiles/token-optimization.md.sha256
+            profiles/token-optimization.md.sig
             claude-operator.gpg.pub
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
