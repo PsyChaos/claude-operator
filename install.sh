@@ -5,12 +5,13 @@
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/PsyChaos/claude-operator/master/install.sh | bash
-#   bash install.sh [--version v1.2.3] [--global] [--strict-checksum]
+#   bash install.sh [--version v1.2.3] [--global] [--strict-checksum] [--verify-sig]
 #
 # Options:
 #   --version vX.Y.Z        Pin to a specific release (enables checksum verification)
 #   --global                Install claude-operator to ~/.local/bin for PATH access
 #   --strict-checksum / -s  Abort if no sha256 tool is available
+#   --verify-sig / -S       Verify GPG signatures on downloaded files (requires gpg)
 
 set -euo pipefail
 
@@ -19,9 +20,13 @@ BRANCH="master"
 RAW_BASE="https://raw.githubusercontent.com/$REPO/$BRANCH"
 RELEASES_BASE="https://github.com/$REPO/releases/download"
 
+GPG_KEY_FILE="${CLAUDE_OPERATOR_GPG_KEY:-$HOME/.config/claude-operator/claude-operator.gpg.pub}"
+GPG_KEY_URL="https://raw.githubusercontent.com/$REPO/$BRANCH/claude-operator.gpg.pub"
+
 VERSION=""
 GLOBAL_INSTALL=false
 STRICT_CHECKSUM=false
+VERIFY_SIG=false
 INSTALL_DIR="$(pwd)"
 
 # ─── Argument parsing ─────────────────────────────────────────────────────────
@@ -44,9 +49,13 @@ while [[ $# -gt 0 ]]; do
       STRICT_CHECKSUM=true
       shift
       ;;
+    --verify-sig|-S)
+      VERIFY_SIG=true
+      shift
+      ;;
     *)
       echo "Unknown argument: $1"
-      echo "Usage: bash install.sh [--version v1.2.3] [--global] [--strict-checksum]"
+      echo "Usage: bash install.sh [--version v1.2.3] [--global] [--strict-checksum] [--verify-sig]"
       exit 1
       ;;
   esac
@@ -100,6 +109,49 @@ _verify_checksum() {
   fi
 }
 
+# ─── GPG helpers ─────────────────────────────────────────────────────────────
+
+_ensure_gpg() {
+  if ! command -v gpg >/dev/null 2>&1; then
+    echo "Error: gpg is required for signature verification but not installed."
+    echo "Install gpg (e.g. apt install gnupg) or omit --verify-sig."
+    exit 1
+  fi
+}
+
+_import_trust_key() {
+  local key_file="${1:-$GPG_KEY_FILE}"
+  _ensure_gpg
+  if [[ ! -f "$key_file" ]]; then
+    echo "Error: Public key not found at $key_file"
+    echo "Run: ./operator.sh trust-key"
+    exit 1
+  fi
+  gpg --import "$key_file" 2>/dev/null || {
+    echo "Error: Failed to import GPG key from $key_file"
+    exit 1
+  }
+  echo "  ✓ GPG key imported from $key_file"
+}
+
+_verify_signature() {
+  local file="$1"
+  local sig_file="$2"
+  _ensure_gpg
+  if [[ ! -f "$sig_file" ]]; then
+    echo "Error: Signature file not found: $sig_file"
+    exit 1
+  fi
+  if gpg --verify "$sig_file" "$file" 2>/dev/null; then
+    echo "  ✓ GPG signature verified: $(basename "$file")"
+    return 0
+  else
+    echo "  ✗ GPG signature verification FAILED: $(basename "$file")"
+    echo "    This file may have been tampered with!"
+    return 1
+  fi
+}
+
 # ─── Download with optional checksum verification ─────────────────────────────
 # Usage: _download_file <filename_in_repo> <destination_path>
 
@@ -136,8 +188,35 @@ _download_file() {
       exit 1
     fi
 
-    mv "$tmp_file" "$dest"
     rm -f "$tmp_sha"
+
+    if [[ "$VERIFY_SIG" == "true" ]]; then
+      local tmp_sig
+      tmp_sig="$(mktemp /tmp/claude-operator-sig-XXXXXX)"
+      curl -fsSL "$RELEASES_BASE/$VERSION/$filename.sig" -o "$tmp_sig" || {
+        rm -f "$tmp_file" "$tmp_sig"
+        echo "  Error: Failed to download signature"
+        exit 1
+      }
+      # Ensure public key is available
+      if [[ ! -f "$GPG_KEY_FILE" ]]; then
+        echo "  Fetching GPG public key..."
+        mkdir -p "$(dirname "$GPG_KEY_FILE")"
+        curl -fsSL "$GPG_KEY_URL" -o "$GPG_KEY_FILE" || {
+          rm -f "$tmp_file" "$tmp_sig"
+          echo "  Error: Failed to download public key"
+          exit 1
+        }
+      fi
+      _import_trust_key "$GPG_KEY_FILE"
+      if ! _verify_signature "$tmp_file" "$tmp_sig"; then
+        rm -f "$tmp_file" "$tmp_sig"
+        exit 1
+      fi
+      rm -f "$tmp_sig"
+    fi
+
+    mv "$tmp_file" "$dest"
   else
     echo "  Downloading $filename from master branch (no checksum)..."
     echo ""
