@@ -43,10 +43,14 @@ jobs:
           grep "OPERATOR_VERSION=" operator.sh
           echo "✅ Version stamped: $TAG_NAME"
 
-      - name: Generate checksum
+      - name: Generate checksums
         run: |
           sha256sum operator.sh > operator.sh.sha256
           sha256sum install.sh > install.sh.sha256
+          mkdir -p profiles
+          for f in profiles/*.md; do
+            sha256sum "$f" > "$f.sha256"
+          done
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -57,5 +61,8 @@ jobs:
             install.sh
             operator.sh.sha256
             install.sh.sha256
+            profiles/elite.md.sha256
+            profiles/high-autonomy.md.sha256
+            profiles/senior-production.md.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

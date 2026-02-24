@@ -18,16 +18,29 @@ API_BASE="https://api.github.com/repos/$REPO"
 TARGET_FILE="$(pwd)/CLAUDE.md"
 MODE_FILE="$(pwd)/.claude_mode"
 
+# ─── Strict checksum flag ─────────────────────────────────────────────────────
+
+STRICT_CHECKSUM=false
+[[ "${OPERATOR_STRICT_CHECKSUM:-false}" == "true" ]] && STRICT_CHECKSUM=true
+
+# ─── Argument parsing ─────────────────────────────────────────────────────────
+
+if [[ "${1:-}" == "--strict-checksum" ]]; then
+  STRICT_CHECKSUM=true
+  shift
+fi
+
 MODE="${1:-}"
 VERSION="${2:-}"
 
 if [ -z "$MODE" ]; then
-  echo "Usage: ./operator.sh <mode> [version]"
+  echo "Usage: ./operator.sh [--strict-checksum] <mode> [version]"
   echo "       ./operator.sh update"
   echo ""
   echo "Examples:"
   echo "  ./operator.sh elite"
   echo "  ./operator.sh elite v1.0.0"
+  echo "  ./operator.sh --strict-checksum elite v1.0.0"
   echo "  ./operator.sh update"
   exit 1
 fi
@@ -55,12 +68,18 @@ _sha256_compute() {
 _verify_checksum() {
   local file="$1"
   local expected_hash="$2"
+  local strict="${3:-false}"
   local actual_hash
   actual_hash=$(_sha256_compute "$file")
 
   if [[ -z "$actual_hash" ]]; then
-    echo "  Warning: No sha256 tool found (sha256sum/shasum). Skipping checksum verification."
-    return 0
+    if [[ "$strict" == "true" ]]; then
+      echo "Error: Strict checksum mode enabled but no sha256 tool found (sha256sum/shasum). Install one or unset OPERATOR_STRICT_CHECKSUM."
+      exit 1
+    else
+      echo "  Warning: No sha256 tool found (sha256sum/shasum). Skipping checksum verification."
+      return 0
+    fi
   fi
 
   if [[ "$actual_hash" == "$expected_hash" ]]; then
@@ -136,7 +155,7 @@ _do_update() {
   local expected_hash
   expected_hash=$(awk '{print $1}' "$tmp_sha")
 
-  if ! _verify_checksum "$tmp_new" "$expected_hash"; then
+  if ! _verify_checksum "$tmp_new" "$expected_hash" "$STRICT_CHECKSUM"; then
     rm -f "$tmp_new" "$tmp_sha"
     echo "  Aborting update due to checksum failure."
     exit 1
@@ -170,29 +189,69 @@ fi
 
 # ─── Profile fetch ────────────────────────────────────────────────────────────
 
-if [ -n "$VERSION" ]; then
-  REF="$VERSION"
-else
-  REF="$BRANCH"
-fi
+_do_fetch_profile() {
+  local tmp_profile
+  tmp_profile="$(mktemp /tmp/claude-operator-profile-XXXXXX)"
 
-PROFILE_URL="https://raw.githubusercontent.com/$REPO/$REF/profiles/$MODE.md"
+  local ref
+  if [ -n "$VERSION" ]; then
+    ref="$VERSION"
+  else
+    ref="$BRANCH"
+  fi
 
-echo "Fetching profile: $MODE"
-echo "Source: $PROFILE_URL"
+  local profile_url="https://raw.githubusercontent.com/$REPO/$ref/profiles/$MODE.md"
 
-curl -fsSL "$PROFILE_URL" -o "$TARGET_FILE" || {
-  echo "Error: Failed to fetch profile '$MODE' (ref: $REF)"
-  echo "Check that the profile name is valid and the version tag exists."
-  exit 1
+  echo "Fetching profile: $MODE"
+  echo "Source: $profile_url"
+
+  curl -fsSL "$profile_url" -o "$tmp_profile" || {
+    rm -f "$tmp_profile"
+    echo "Error: Failed to fetch profile '$MODE' (ref: $ref)"
+    echo "Check that the profile name is valid and the version tag exists."
+    exit 1
+  }
+
+  if [ -n "$VERSION" ]; then
+    # Versioned fetch — verify against sidecar checksum
+    local tmp_sha
+    tmp_sha="$(mktemp /tmp/claude-operator-sha-XXXXXX)"
+    local sha_url="$RELEASES_BASE/$VERSION/profiles/$MODE.md.sha256"
+
+    echo "  Fetching profile checksum..."
+    curl -fsSL "$sha_url" -o "$tmp_sha" || {
+      rm -f "$tmp_profile" "$tmp_sha"
+      echo "  Error: Failed to download profile checksum from $sha_url"
+      exit 1
+    }
+
+    local expected_hash
+    expected_hash=$(awk '{print $1}' "$tmp_sha")
+
+    if ! _verify_checksum "$tmp_profile" "$expected_hash" "$STRICT_CHECKSUM"; then
+      rm -f "$tmp_profile" "$tmp_sha"
+      echo "  Aborting due to profile checksum failure."
+      exit 1
+    fi
+
+    rm -f "$tmp_sha"
+  else
+    # Master branch fetch — no sidecar checksum available
+    echo "  Note: Fetching from master branch. No checksum sidecar available."
+    echo "        For supply-chain security, use: ./operator.sh <mode> vX.Y.Z"
+  fi
+
+  mv "$tmp_profile" "$TARGET_FILE"
+
+  echo "$MODE@$ref" > "$MODE_FILE"
+
+  echo ""
+  echo "========================================"
+  echo " Active Claude Mode: $MODE"
+  echo " Version/Ref: $ref"
+  echo " CLAUDE.md updated successfully"
+  echo "========================================"
+  echo ""
 }
 
-echo "$MODE@$REF" > "$MODE_FILE"
-
-echo ""
-echo "========================================"
-echo " Active Claude Mode: $MODE"
-echo " Version/Ref: $REF"
-echo " CLAUDE.md updated successfully"
-echo "========================================"
-echo ""
+_do_fetch_profile

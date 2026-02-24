@@ -5,11 +5,12 @@
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/PsyChaos/claude-operator/master/install.sh | bash
-#   bash install.sh [--version v1.2.3] [--global]
+#   bash install.sh [--version v1.2.3] [--global] [--strict-checksum]
 #
 # Options:
-#   --version vX.Y.Z   Pin to a specific release (enables checksum verification)
-#   --global           Install claude-operator to ~/.local/bin for PATH access
+#   --version vX.Y.Z        Pin to a specific release (enables checksum verification)
+#   --global                Install claude-operator to ~/.local/bin for PATH access
+#   --strict-checksum / -s  Abort if no sha256 tool is available
 
 set -euo pipefail
 
@@ -20,6 +21,7 @@ RELEASES_BASE="https://github.com/$REPO/releases/download"
 
 VERSION=""
 GLOBAL_INSTALL=false
+STRICT_CHECKSUM=false
 INSTALL_DIR="$(pwd)"
 
 # ─── Argument parsing ─────────────────────────────────────────────────────────
@@ -38,9 +40,13 @@ while [[ $# -gt 0 ]]; do
       GLOBAL_INSTALL=true
       shift
       ;;
+    --strict-checksum|-s)
+      STRICT_CHECKSUM=true
+      shift
+      ;;
     *)
       echo "Unknown argument: $1"
-      echo "Usage: bash install.sh [--version v1.2.3] [--global]"
+      echo "Usage: bash install.sh [--version v1.2.3] [--global] [--strict-checksum]"
       exit 1
       ;;
   esac
@@ -69,12 +75,18 @@ _sha256_compute() {
 _verify_checksum() {
   local file="$1"
   local expected_hash="$2"
+  local strict="${3:-false}"
   local actual_hash
   actual_hash=$(_sha256_compute "$file")
 
   if [[ -z "$actual_hash" ]]; then
-    echo "  Warning: No sha256 tool found (sha256sum/shasum). Skipping verification."
-    return 0
+    if [[ "$strict" == "true" ]]; then
+      echo "Error: Strict checksum mode enabled but no sha256 tool found (sha256sum/shasum). Install one or unset OPERATOR_STRICT_CHECKSUM."
+      exit 1
+    else
+      echo "  Warning: No sha256 tool found (sha256sum/shasum). Skipping verification."
+      return 0
+    fi
   fi
 
   if [[ "$actual_hash" == "$expected_hash" ]]; then
@@ -119,7 +131,7 @@ _download_file() {
     local expected_hash
     expected_hash=$(awk '{print $1}' "$tmp_sha")
 
-    if ! _verify_checksum "$tmp_file" "$expected_hash"; then
+    if ! _verify_checksum "$tmp_file" "$expected_hash" "$STRICT_CHECKSUM"; then
       rm -f "$tmp_file" "$tmp_sha"
       exit 1
     fi
@@ -128,6 +140,10 @@ _download_file() {
     rm -f "$tmp_sha"
   else
     echo "  Downloading $filename from master branch (no checksum)..."
+    echo ""
+    echo "  Warning: Installing from master branch without checksum verification."
+    echo "           For supply-chain security, use: --version vX.Y.Z --strict-checksum"
+    echo ""
     curl -fsSL "$RAW_BASE/$filename" -o "$dest" || {
       echo "  Error: Failed to download $RAW_BASE/$filename"
       exit 1
@@ -207,7 +223,7 @@ echo ""
 
 if [[ -z "$VERSION" ]]; then
   echo "Tip: Pin a version for checksum security:"
-  echo "  bash install.sh --version v1.0.0"
+  echo "  bash install.sh --version v1.0.0 --strict-checksum"
   echo ""
 fi
 
