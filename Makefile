@@ -25,13 +25,12 @@ claude:
 	fi
 
 list:
-	@echo "Available profiles:"
 	@if [ -d profiles ]; then \
+		echo "Available profiles:"; \
 		ls profiles/*.md 2>/dev/null | sed 's|profiles/||;s|\.md||' | sed 's/^/  /'; \
 	else \
-		echo "  senior-production"; \
-		echo "  high-autonomy"; \
-		echo "  elite"; \
+		./operator.sh plugin list --core-only 2>/dev/null || \
+		./operator.sh plugin list; \
 	fi
 
 current:

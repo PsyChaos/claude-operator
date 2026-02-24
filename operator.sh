@@ -101,8 +101,9 @@ done
 MODE="${1:-}"
 shift || true
 
-# Parse remaining args: flags can appear after MODE, VERSION is the first non-flag
+# Collect remaining positional args and flags separately
 VERSION=""
+POSITIONAL_ARGS=()
 while [[ $# -gt 0 ]]; do
   case "${1:-}" in
     --strict-checksum)
@@ -130,14 +131,17 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     *)
-      # First non-flag positional after MODE is VERSION
-      if [[ -z "$VERSION" ]]; then
-        VERSION="$1"
-      fi
+      POSITIONAL_ARGS+=("$1")
       shift
       ;;
   esac
 done
+
+# For profile mode: first positional is VERSION
+# For plugin/restore: positionals are subcommand args
+if [[ "$MODE" != "plugin" && "$MODE" != "restore" ]]; then
+  VERSION="${POSITIONAL_ARGS[0]:-}"
+fi
 
 if [ -z "$MODE" ]; then
   echo "Usage: ./operator.sh [flags] <mode> [version]"
@@ -441,9 +445,8 @@ _do_restore() {
   local list_mode=false
   local target_ts=""
 
-  # Parse restore sub-args
-  local restore_arg="${2:-}"
-  local restore_arg2="${3:-}"
+  # Parse restore sub-args from POSITIONAL_ARGS
+  local restore_arg="${POSITIONAL_ARGS[0]:-}"
   if [[ "$restore_arg" == "--list" ]]; then
     list_mode=true
   elif [[ -n "$restore_arg" ]]; then
@@ -1010,9 +1013,25 @@ _plugin_add() {
 
 _plugin_list() {
   echo "Core profiles ($REPO):"
-  echo "  elite"
-  echo "  high-autonomy"
-  echo "  senior-production"
+  # Fetch live list from GitHub API
+  local contents_url="https://api.github.com/repos/$REPO/contents/profiles"
+  local profiles_json
+  profiles_json=$(curl -fsSL "$contents_url" 2>/dev/null) || profiles_json=""
+  if [[ -n "$profiles_json" ]]; then
+    printf '%s' "$profiles_json" \
+      | grep -o '"name": *"[^"]*\.md"' \
+      | grep -o '"[^"]*\.md"' \
+      | tr -d '"' \
+      | sed 's/\.md$//' \
+      | sed 's/^/  /'
+  else
+    # Fallback if API unreachable
+    echo "  elite"
+    echo "  high-autonomy"
+    echo "  memory-centric"
+    echo "  senior-production"
+    echo "  token-optimization"
+  fi
   echo ""
 
   if [[ -f "$REGISTRIES_FILE" ]]; then
@@ -1217,9 +1236,9 @@ fi
 # ─── Plugin subcommand ────────────────────────────────────────────────────────
 
 if [[ "$MODE" == "plugin" ]]; then
-  PLUGIN_CMD="${2:-}"
-  PLUGIN_ARG="${3:-}"
-  PLUGIN_VERSION="${4:-}"
+  PLUGIN_CMD="${POSITIONAL_ARGS[0]:-}"
+  PLUGIN_ARG="${POSITIONAL_ARGS[1]:-}"
+  PLUGIN_VERSION="${POSITIONAL_ARGS[2]:-}"
   case "$PLUGIN_CMD" in
     add)    _plugin_add "$PLUGIN_ARG" "$PLUGIN_VERSION" ;;
     list)   _plugin_list ;;
