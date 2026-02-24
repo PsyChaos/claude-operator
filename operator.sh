@@ -38,6 +38,24 @@ LOCAL_PLUGINS_DIR="$(pwd)/claude-operator-plugins"
 VERIFY_SIG=false
 [[ "${OPERATOR_VERIFY_SIG:-false}" == "true" ]] && VERIFY_SIG=true
 
+# ─── Enterprise ───────────────────────────────────────────────────────────────
+
+ENTERPRISE_CONFIG_SYSTEM="/etc/claude-operator/enterprise.conf"
+ENTERPRISE_CONFIG_USER="${CLAUDE_OPERATOR_ENTERPRISE_CONFIG:-$HOME/.config/claude-operator/enterprise.conf}"
+CACHE_DIR="$HOME/.config/claude-operator/cache"
+
+# Enterprise defaults (overridden by config)
+ENTERPRISE_MODE=false
+ALLOWED_PROFILES=""
+ALLOWED_REGISTRIES=""
+REQUIRE_VERSION_PIN=false
+REQUIRE_CHECKSUM=false
+REQUIRE_SIGNATURE=false
+AUDIT_LOG=""
+PROFILE_REGISTRY_URL=""
+UPDATE_POLICY="auto"
+OFFLINE_MODE=false
+
 # ─── Argument parsing ─────────────────────────────────────────────────────────
 
 while [[ "${1:-}" == --* ]]; do
@@ -64,6 +82,7 @@ if [ -z "$MODE" ]; then
   echo "       ./operator.sh update"
   echo "       ./operator.sh plugin <add|list|remove|update> [registry] [version]"
   echo "       ./operator.sh trust-key"
+  echo "       ./operator.sh enterprise-status"
   echo ""
   echo "Examples:"
   echo "  ./operator.sh elite"
@@ -77,6 +96,7 @@ if [ -z "$MODE" ]; then
   echo "  ./operator.sh plugin remove myorg/my-profiles"
   echo "  ./operator.sh plugin update"
   echo "  ./operator.sh trust-key"
+  echo "  ./operator.sh enterprise-status"
   exit 1
 fi
 
@@ -169,6 +189,119 @@ _verify_signature() {
     echo "    This file may have been tampered with!"
     return 1
   fi
+}
+
+# ─── Enterprise config loader ─────────────────────────────────────────────────
+
+_load_enterprise_config() {
+  # Load system-level config first
+  if [[ -f "$ENTERPRISE_CONFIG_SYSTEM" ]]; then
+    # shellcheck source=/dev/null
+    source "$ENTERPRISE_CONFIG_SYSTEM"
+  fi
+
+  # Load user-level config (overrides system)
+  if [[ -f "$ENTERPRISE_CONFIG_USER" ]]; then
+    # shellcheck source=/dev/null
+    source "$ENTERPRISE_CONFIG_USER"
+  fi
+
+  # Env vars override config files
+  [[ -n "${CO_ENTERPRISE_MODE:-}" ]]       && ENTERPRISE_MODE="$CO_ENTERPRISE_MODE"
+  [[ -n "${CO_ALLOWED_PROFILES:-}" ]]      && ALLOWED_PROFILES="$CO_ALLOWED_PROFILES"
+  [[ -n "${CO_REQUIRE_VERSION_PIN:-}" ]]   && REQUIRE_VERSION_PIN="$CO_REQUIRE_VERSION_PIN"
+  [[ -n "${CO_REQUIRE_CHECKSUM:-}" ]]      && REQUIRE_CHECKSUM="$CO_REQUIRE_CHECKSUM"
+  [[ -n "${CO_REQUIRE_SIGNATURE:-}" ]]     && REQUIRE_SIGNATURE="$CO_REQUIRE_SIGNATURE"
+  [[ -n "${CO_AUDIT_LOG:-}" ]]             && AUDIT_LOG="$CO_AUDIT_LOG"
+  [[ -n "${CO_PROFILE_REGISTRY_URL:-}" ]]  && PROFILE_REGISTRY_URL="$CO_PROFILE_REGISTRY_URL"
+  [[ -n "${CO_UPDATE_POLICY:-}" ]]         && UPDATE_POLICY="$CO_UPDATE_POLICY"
+  [[ -n "${CO_OFFLINE_MODE:-}" ]]          && OFFLINE_MODE="$CO_OFFLINE_MODE"
+}
+
+# ─── Audit logger ─────────────────────────────────────────────────────────────
+
+_audit_log() {
+  local outcome="$1"
+  local message="${2:-}"
+  if [[ -n "$AUDIT_LOG" ]]; then
+    local timestamp
+    timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    local entry="[$timestamp] user=${USER:-unknown} mode=${MODE:-unknown} version=${VERSION:-unset} outcome=$outcome"
+    [[ -n "$message" ]] && entry="$entry message=$message"
+    mkdir -p "$(dirname "$AUDIT_LOG")"
+    echo "$entry" >> "$AUDIT_LOG" 2>/dev/null || true
+  fi
+}
+
+# ─── Enterprise policy enforcement ───────────────────────────────────────────
+
+_enforce_enterprise_policies() {
+  if [[ "$ENTERPRISE_MODE" != "true" ]]; then
+    return 0
+  fi
+
+  echo "  [Enterprise] Policy enforcement active"
+
+  # Require version pin
+  if [[ "$REQUIRE_VERSION_PIN" == "true" && -z "$VERSION" && "$MODE" != "update" && "$MODE" != "plugin" ]]; then
+    echo "Error: [Enterprise] Version pinning required. Use: ./operator.sh <mode> <version>"
+    _audit_log "failed" "version_pin_required"
+    exit 1
+  fi
+
+  # Require strict checksum
+  if [[ "$REQUIRE_CHECKSUM" == "true" ]]; then
+    STRICT_CHECKSUM=true
+  fi
+
+  # Require signature
+  if [[ "$REQUIRE_SIGNATURE" == "true" ]]; then
+    VERIFY_SIG="${VERIFY_SIG:-false}"  # will be set if signed-releases feature is present
+  fi
+
+  # Check allowed profiles
+  if [[ -n "$ALLOWED_PROFILES" && "$MODE" != "update" && "$MODE" != "plugin" && "$MODE" != "trust-key" ]]; then
+    local allowed=false
+    for p in $ALLOWED_PROFILES; do
+      [[ "$p" == "$MODE" ]] && allowed=true && break
+    done
+    if [[ "$allowed" != "true" ]]; then
+      echo "Error: [Enterprise] Profile '$MODE' is not in the allowed list: $ALLOWED_PROFILES"
+      _audit_log "failed" "profile_not_allowed=$MODE"
+      exit 1
+    fi
+  fi
+
+  # Block updates if policy is manual
+  if [[ "$UPDATE_POLICY" == "manual" && "$MODE" == "update" ]]; then
+    echo "Error: [Enterprise] Auto-updates are disabled (UPDATE_POLICY=manual)."
+    echo "       Contact your administrator to update claude-operator."
+    _audit_log "failed" "update_blocked_by_policy"
+    exit 1
+  fi
+}
+
+# ─── Cache helpers ────────────────────────────────────────────────────────────
+
+_cache_profile() {
+  local mode="$1"
+  local ref="$2"
+  local src_file="$3"
+  mkdir -p "$CACHE_DIR"
+  local cache_file="$CACHE_DIR/${mode}@${ref}.md"
+  cp "$src_file" "$cache_file" 2>/dev/null || true
+}
+
+_serve_from_cache() {
+  local mode="$1"
+  local ref="$2"
+  local cache_file="$CACHE_DIR/${mode}@${ref}.md"
+  if [[ -f "$cache_file" ]]; then
+    echo "  [Cache] Serving from cache: $cache_file"
+    cp "$cache_file" "$TARGET_FILE"
+    return 0
+  fi
+  return 1
 }
 
 # ─── Self-Update ──────────────────────────────────────────────────────────────
@@ -276,6 +409,7 @@ _do_update() {
   echo " claude-operator updated to $latest_tag"
   echo "========================================"
   echo ""
+  _audit_log "success" "updated_to=$latest_tag"
   exit 0
 }
 
@@ -584,6 +718,29 @@ _resolve_mode() {
   return 0
 }
 
+# ─── Enterprise status command ────────────────────────────────────────────────
+
+if [[ "$MODE" == "enterprise-status" ]]; then
+  _load_enterprise_config
+  echo "Enterprise Configuration:"
+  echo "  ENTERPRISE_MODE:       $ENTERPRISE_MODE"
+  echo "  ALLOWED_PROFILES:      ${ALLOWED_PROFILES:-<all>}"
+  echo "  REQUIRE_VERSION_PIN:   $REQUIRE_VERSION_PIN"
+  echo "  REQUIRE_CHECKSUM:      $REQUIRE_CHECKSUM"
+  echo "  REQUIRE_SIGNATURE:     $REQUIRE_SIGNATURE"
+  echo "  AUDIT_LOG:             ${AUDIT_LOG:-<disabled>}"
+  echo "  PROFILE_REGISTRY_URL:  ${PROFILE_REGISTRY_URL:-<github>}"
+  echo "  UPDATE_POLICY:         $UPDATE_POLICY"
+  echo "  OFFLINE_MODE:          $OFFLINE_MODE"
+  echo "  CACHE_DIR:             $CACHE_DIR"
+  exit 0
+fi
+
+# ─── Load enterprise config and enforce policies ──────────────────────────────
+
+_load_enterprise_config
+_enforce_enterprise_policies
+
 # ─── Update branch ────────────────────────────────────────────────────────────
 
 if [[ "$MODE" == "update" ]]; then
@@ -648,7 +805,31 @@ _do_fetch_profile() {
     ref="$BRANCH"
   fi
 
-  local profile_url="https://raw.githubusercontent.com/$REPO/$ref/profiles/$MODE.md"
+  # Offline mode: serve from cache only
+  if [[ "$OFFLINE_MODE" == "true" ]]; then
+    if _serve_from_cache "$MODE" "$ref"; then
+      echo "$MODE@$ref" > "$MODE_FILE"
+      echo ""
+      echo "========================================"
+      echo " Active Claude Mode: $MODE"
+      echo " Version/Ref: $ref"
+      echo " CLAUDE.md updated successfully"
+      echo "========================================"
+      echo ""
+      return 0
+    else
+      echo "Error: [Enterprise] Offline mode enabled but no cached version of '$MODE@$ref' found."
+      exit 1
+    fi
+  fi
+
+  # Determine profile URL
+  local profile_url
+  if [[ -n "$PROFILE_REGISTRY_URL" ]]; then
+    profile_url="${PROFILE_REGISTRY_URL%/}/profiles/$MODE.md"
+  else
+    profile_url="https://raw.githubusercontent.com/$REPO/$ref/profiles/$MODE.md"
+  fi
 
   echo "Fetching profile: $MODE"
   echo "Source: $profile_url"
@@ -710,6 +891,9 @@ _do_fetch_profile() {
 
   mv "$tmp_profile" "$TARGET_FILE"
 
+  # Cache the successfully fetched profile
+  _cache_profile "$MODE" "$ref" "$TARGET_FILE"
+
   echo "$MODE@$ref" > "$MODE_FILE"
 
   echo ""
@@ -722,3 +906,4 @@ _do_fetch_profile() {
 }
 
 _do_fetch_profile
+_audit_log "success"
