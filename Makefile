@@ -4,14 +4,19 @@
 MODE ?= elite
 VERSION ?=
 ENTERPRISE_CONFIG ?=
+CONFLICT ?=
 
-.PHONY: claude list current update install-global help plugin-add plugin-list plugin-remove plugin-update enterprise-config audit-log enterprise-status
+.PHONY: claude list current update install-global restore restore-list help plugin-add plugin-list plugin-remove plugin-update enterprise-config audit-log enterprise-status
 
 claude:
-	@if [ -n "$(VERSION)" ]; then \
-		./operator.sh $(MODE) $(VERSION); \
+	@flags=""; \
+	[ "$(CONFLICT)" = "merge" ]  && flags="--merge"; \
+	[ "$(CONFLICT)" = "force" ]  && flags="--force"; \
+	[ "$(CONFLICT)" = "backup" ] && flags="--backup"; \
+	if [ -n "$(VERSION)" ]; then \
+		./operator.sh $$flags $(MODE) $(VERSION); \
 	else \
-		./operator.sh $(MODE); \
+		./operator.sh $$flags $(MODE); \
 	fi
 
 list:
@@ -87,13 +92,21 @@ audit-log:
 enterprise-status:
 	@./operator.sh enterprise-status
 
+restore:
+	@./operator.sh restore
+
+restore-list:
+	@./operator.sh restore --list
 
 help:
 	@echo ""
 	@echo "claude-operator commands:"
 	@echo ""
-	@echo "  make claude MODE=<profile> [VERSION=<tag>]"
+	@echo "  make claude MODE=<profile> [VERSION=<tag>] [CONFLICT=merge|backup|force]"
 	@echo "      → Activate profile (optionally pinned to tag)"
+	@echo "        CONFLICT=merge   keep project content, append profile below"
+	@echo "        CONFLICT=backup  backup existing CLAUDE.md then overwrite"
+	@echo "        CONFLICT=force   overwrite without prompting"
 	@echo ""
 	@echo "  make list"
 	@echo "      → Show available profiles"
@@ -127,6 +140,12 @@ help:
 	@echo ""
 	@echo "  make audit-log"
 	@echo "      → Display the audit log"
+	@echo ""
+	@echo "  make restore"
+	@echo "      → Restore CLAUDE.md (remove sentinel or load last backup)"
+	@echo ""
+	@echo "  make restore-list"
+	@echo "      → List available backups"
 	@echo ""
 	@echo "Examples:"
 	@echo "  make claude MODE=elite"
