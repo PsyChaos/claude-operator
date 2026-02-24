@@ -722,7 +722,35 @@ _do_update() {
   release_json=$(printf '%s' "$release_json" | grep -v '__HTTP_CODE__:')
 
   if [[ "$http_code" == "404" ]]; then
-    echo "Already up to date. No releases published yet."
+    echo "No releases found. Updating from master branch..."
+    echo ""
+    local self_dir
+    self_dir="$(dirname "$self")"
+    local tmp_new tmp_make
+    tmp_new="$(mktemp /tmp/claude-operator-update-XXXXXX)"
+    tmp_make="$(mktemp /tmp/claude-operator-makefile-XXXXXX)"
+    curl -fsSL "https://raw.githubusercontent.com/$REPO/master/operator.sh" -o "$tmp_new" || {
+      rm -f "$tmp_new" "$tmp_make"
+      echo "Error: Failed to download operator.sh from master."
+      exit 1
+    }
+    chmod +x "$tmp_new"
+    mv "$tmp_new" "$self"
+    echo "  operator.sh updated."
+    if [[ -f "$self_dir/Makefile" ]]; then
+      curl -fsSL "https://raw.githubusercontent.com/$REPO/master/Makefile" -o "$tmp_make" 2>/dev/null || true
+      if [[ -s "$tmp_make" ]]; then
+        mv "$tmp_make" "$self_dir/Makefile"
+        echo "  Makefile updated."
+      else
+        rm -f "$tmp_make"
+      fi
+    fi
+    echo ""
+    echo "========================================"
+    echo " claude-operator updated from master"
+    echo "========================================"
+    echo ""
     exit 0
   fi
 
@@ -814,6 +842,27 @@ _do_update() {
     echo "If installed system-wide, try: sudo operator.sh update"
     exit 1
   }
+
+  # Update Makefile if it exists alongside operator.sh
+  local self_dir
+  self_dir="$(dirname "$self")"
+  local makefile="$self_dir/Makefile"
+  if [[ -f "$makefile" ]]; then
+    echo "  Updating Makefile..."
+    local tmp_make
+    tmp_make="$(mktemp /tmp/claude-operator-makefile-XXXXXX)"
+    local makefile_url="$RELEASES_BASE/$latest_tag/Makefile"
+    curl -fsSL "$makefile_url" -o "$tmp_make" 2>/dev/null || {
+      curl -fsSL "https://raw.githubusercontent.com/$REPO/master/Makefile" -o "$tmp_make" 2>/dev/null || true
+    }
+    if [[ -s "$tmp_make" ]]; then
+      mv "$tmp_make" "$makefile"
+      echo "  Makefile updated."
+    else
+      rm -f "$tmp_make"
+      echo "  Warning: Could not update Makefile."
+    fi
+  fi
 
   echo ""
   echo "========================================"
