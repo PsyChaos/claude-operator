@@ -1,360 +1,228 @@
 # claude-operator
 
-**Runtime profile switching system for `CLAUDE.md`.**
+Runtime profile switching system for `CLAUDE.md`.
 
-Claude'un davranışını yöneten `CLAUDE.md` dosyasını — versioned, checksummed, imzalanmış ve geri alınabilir biçimde — yönetmek için tasarlanmış, dependency-free bir Bash CLI aracı.
-
-> Claude configuration is infrastructure. It should be versioned, explicit, reproducible, and intentional.
+Production-safe, versioned, reproducible configuration management for Claude operating modes.
 
 ---
 
-## İçindekiler
+## 🚀 Why?
 
-- [Neden?](#-neden)
-- [Özellikler](#-özellikler)
-- [Kurulum](#-kurulum)
-- [Temel Kullanım](#-temel-kullanım)
-- [Conflict Detection](#-conflict-detection)
-- [Plugin Mimarisi](#-plugin-mimarisi)
-- [Güvenlik](#-güvenlik)
-- [Enterprise Mode](#-enterprise-mode)
-- [Self-Update](#-self-update)
-- [Referans](#-referans)
-- [Felsefe](#-felsefe)
-- [Katkı](#-katkı)
+Managing multiple Claude operating styles across projects can become inconsistent and error-prone.
+
+You may want:
+
+* 🛡 **Senior Production mode** for infrastructure and stability-critical systems
+* ⚡ **High Autonomy mode** for rapid iteration and reduced clarification loops
+* 🔥 **Elite Hybrid mode** for production-grade autonomy with risk calibration
+
+`claude-operator` allows deterministic switching between these modes across projects.
 
 ---
 
-## 🚀 Neden?
+## 📦 Features
 
-Bir projede Claude'un nasıl davranacağını `CLAUDE.md` dosyası belirler. Farklı iş bağlamları, farklı Claude kişilikleri gerektirir:
-
-| Bağlam | İstenen Davranış |
-|---|---|
-| Production altyapısı | Temkinli, minimal risk, her değişikliği doğrula |
-| Hızlı prototipleme | Otonom, clarification loop'suz, iteratif |
-| Kompleks özellik geliştirme | Dengeli: production kalitesi + özerk yürütme |
-
-`claude-operator` bu profilleri merkezi olarak yönetir, sürüm pinler, bütünlük doğrular ve projeler arasında deterministik geçiş sağlar.
-
----
-
-## 📦 Özellikler
-
-### Temel
-- **Remote profile fetching** — GitHub üzerinden profile dosyaları çeker
-- **Version pinning** — `v1.0.0` gibi belirli bir release'e kilitlenme
-- **SHA256 checksum verification** — indirilen her dosya imzalanmış checksumla doğrulanır
-- **Atomic writes** — temp dosya + `mv`, `CLAUDE.md`'ye yarım yazma olmaz
-- **Strict checksum mode** — `--strict-checksum` ile sha256 tool yoksa hard fail
-
-### Güvenlik
-- **GPG signed releases** — tüm release asset'leri CI bot key ile imzalanır
-- **Trust key management** — `trust-key` komutu public key'i otomatik indirir ve import eder
-- **Signature verification** — `--verify-sig` ile her indirmede GPG doğrulama
-
-### Conflict Detection
-- **Unmanaged CLAUDE.md koruması** — mevcut proje dosyasını tespit eder, sorulmadan silmez
-- **Interactive prompt** — `[backup / merge / overwrite / abort]` seçenekleri, 10s timeout
-- **Backup & restore** — `.claude_backup/` altında max 5 zaman damgalı yedek
-- **Sentinel-based composition** — `--merge` ile proje içeriğini koruyarak profil ekler
-- **CI-safe defaults** — non-interactive ortamda sessiz backup
-
-### Plugin Mimarisi
-- **GitHub repo as registry** — `profiles/*.md` içeren herhangi bir repo plugin olabilir
-- **Local override** — `./claude-operator-plugins/` öncelik sırasının başında
-- **Versioned plugin fetch** — plugin'ler sürüm pinlenebilir, checksum doğrulanır
-- **plugin.json manifest** — opsiyonel metadata desteği
-
-### Enterprise
-- **Policy enforcement** — profile whitelist, version pin zorunluluğu, signature zorunluluğu
-- **Audit logging** — her işlem ISO8601 timestamp ile loglanır
-- **Offline / air-gapped** — local cache'den serve, network çağrısı yok
-- **Custom registry** — iç sunucu URL'si ile GitHub yerine internal mirror
-- **Shell-sourceable config** — `/etc/claude-operator/enterprise.conf`
-
-### Operasyonel
-- **Self-update** — GitHub API üzerinden versiyon karşılaştırır, atomik günceller
-- **Global CLI** — `~/.local/bin/claude-operator` ile PATH'e eklenir
-- **Makefile integration** — tüm komutlar `make` target'larıyla erişilebilir
-- **Dependency-free** — bash + curl + sha256sum/shasum. Başka hiçbir şey gerekmez.
+* Centralized profile management
+* Deterministic mode switching
+* Remote profile fetching (GitHub raw)
+* **Version pinning with SHA256 checksum verification**
+* **Strict checksum mode** — hard fail if no sha256 tool is available (`--strict-checksum`)
+* **Atomic profile writes** — temp file + `mv`, no partial writes to `CLAUDE.md`
+* **GPG signed releases** — all release assets signed by CI bot key (`--verify-sig`)
+* **Trust key management** — `trust-key` command imports the public key automatically
+* **Plugin architecture** — add any GitHub repo as a profile registry
+* **Local profile override** — `./claude-operator-plugins/` takes precedence
+* **Enterprise mode** — policy enforcement, audit logging, offline cache, custom registry
+* **Global CLI binary** (`claude-operator` on your PATH)
+* **Self-update command** (`operator.sh update`)
+* Makefile integration
+* Semantic Versioning (SemVer)
+* CI-friendly
+* Reproducible team-wide behavior
 
 ---
 
-## 📁 Depo Yapısı
+## 📁 Repository Structure
 
 ```
 claude-operator/
+│
 ├── profiles/
-│   ├── elite.md                  # Production-grade autonomy + risk calibration
-│   ├── high-autonomy.md          # Minimal clarification, fast iteration
-│   └── senior-production.md      # Conservative, stability-first
-├── operator.sh                   # Ana CLI binary
-├── install.sh                    # Installer (local veya global)
-├── Makefile                      # Kullanıcı dostu task runner
-├── claude-operator.gpg.pub       # CI bot GPG public key
+│   ├── senior-production.md
+│   ├── high-autonomy.md
+│   └── elite.md
+│
+├── operator.sh
+├── install.sh
+├── Makefile
+├── claude-operator.gpg.pub
 └── .github/workflows/release.yaml
 ```
 
 ---
 
-## 🔧 Kurulum
+## 🔧 Installation
 
-### Tek satır (en güncel, checksum yok)
+### One-line install (latest, no checksum)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/PsyChaos/claude-operator/master/install.sh | bash
 ```
 
-### Sürüm pinli + SHA256 doğrulama (önerilen)
+### Pinned install with checksum verification (recommended)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/PsyChaos/claude-operator/master/install.sh \
   | bash -s -- --version v1.0.0
 ```
 
-### Sürüm pinli + SHA256 + GPG imza doğrulama (maksimum güvenlik)
+Downloads `operator.sh` from the GitHub Release and verifies its SHA256 checksum before installing.
+
+### Pinned install with GPG signature verification
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/PsyChaos/claude-operator/master/install.sh \
   | bash -s -- --version v1.0.0 --verify-sig
 ```
 
-### Global kurulum (`claude-operator` komutunu PATH'e ekler)
+Verifies both the SHA256 checksum and the GPG detached signature before writing anything to disk.
+
+### Global install (adds `claude-operator` to your PATH)
 
 ```bash
-# Pinned + imzalı (önerilen)
+# Latest
+curl -fsSL https://raw.githubusercontent.com/PsyChaos/claude-operator/master/install.sh \
+  | bash -s -- --global
+
+# Pinned + verified (recommended)
 curl -fsSL https://raw.githubusercontent.com/PsyChaos/claude-operator/master/install.sh \
   | bash -s -- --global --version v1.0.0 --verify-sig
 ```
 
-`~/.local/bin/claude-operator` olarak kurulur. PATH'te yoksa installer gerekli satırı gösterir.
+Installs to `~/.local/bin/claude-operator`. If `~/.local/bin` is not in your `$PATH`, the installer will print the line to add to your shell profile.
 
-### Enterprise kurulum
+### Enterprise install
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/PsyChaos/claude-operator/master/install.sh \
   | bash -s -- --version v1.0.0 --enterprise
 ```
 
-Binary'yi kurar ve `~/.config/claude-operator/enterprise.conf` konumuna yorumlu config template'i yazar.
+Installs the binary and generates a commented enterprise configuration template at `~/.config/claude-operator/enterprise.conf`.
 
-### Kurulum flag'leri
+### Install flags
 
 ```bash
-bash install.sh [seçenekler]
+bash install.sh [--version v1.2.3] [--global] [--strict-checksum] [--verify-sig] [--enterprise] [--enterprise-config /path/to/config]
 ```
 
-| Flag | Kısa | Açıklama |
-|------|------|----------|
-| `--version v1.0.0` | `-v` | Release'e pin, SHA256 doğrulama etkinleşir |
-| `--global` | `-g` | `~/.local/bin/` altına global kurulum |
-| `--strict-checksum` | `-s` | SHA256 tool yoksa hard fail (warning yerine) |
-| `--verify-sig` | `-S` | GPG imza doğrulama (gpg gerektirir) |
-| `--enterprise` | `-e` | Enterprise config template oluştur |
-| `--enterprise-config <path>` | | Config template'i özel path'e yaz |
+| Flag | Description |
+|------|-------------|
+| `--version v1.0.0` | Pin to a release and verify SHA256 checksum |
+| `--global` | Install to `~/.local/bin` for global PATH access |
+| `--strict-checksum` / `-s` | Abort if no sha256 tool is available (instead of warning) |
+| `--verify-sig` / `-S` | Verify GPG signature of downloaded files (requires `gpg`) |
+| `--enterprise` / `-e` | Generate enterprise configuration template |
+| `--enterprise-config <path>` | Write enterprise config template to a custom path |
 
 ---
 
-## 🧠 Temel Kullanım
+## 🧠 Usage
 
-### Profil geçişi
+### Switch profile
+
+```bash
+make claude MODE=elite
+```
 
 ```bash
 ./operator.sh elite
-./operator.sh elite v1.0.0          # sürüm pinli
-make claude MODE=elite
-make claude MODE=elite VERSION=v1.0.0
-claude-operator elite               # global kurulum sonrası
 ```
-
-### Kullanılabilir profiller
-
-| Profil | Karakter |
-|--------|----------|
-| `elite` | Production kalitesi + otonom yürütme dengesi, risk kalibrasyonlu |
-| `high-autonomy` | Minimal clarification, maksimum iterasyon hızı |
-| `senior-production` | Temkinli, stability-first, her değişikliği doğrula |
-
-### Runtime flag'leri
 
 ```bash
-./operator.sh [flag'ler] <mod> [versiyon]
+claude-operator elite          # after global install
 ```
 
-| Flag | Env var | Açıklama |
-|------|---------|----------|
-| `--strict-checksum` | `OPERATOR_STRICT_CHECKSUM=true` | SHA256 tool yoksa abort |
-| `--verify-sig` | `OPERATOR_VERIFY_SIG=true` | GPG imza doğrulama |
-| `--force` | `CLAUDE_OPERATOR_CONFLICT=force` | Mevcut CLAUDE.md'yi sormadan sil |
-| `--backup` | `CLAUDE_OPERATOR_CONFLICT=backup` | Önce yedekle, sonra üzerine yaz |
-| `--merge` | `CLAUDE_OPERATOR_CONFLICT=merge` | Proje içeriğini koru, profili ekle |
+### Switch profile (pinned to a specific release)
 
-### Aktif modu göster
+```bash
+make claude MODE=elite VERSION=v1.0.0
+```
+
+```bash
+./operator.sh elite v1.0.0
+```
+
+Versioned fetches also verify the profile's SHA256 checksum against the sidecar published in the GitHub Release.
+
+### Runtime flags
+
+```bash
+./operator.sh [--strict-checksum] [--verify-sig] <mode> [version]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--strict-checksum` | Hard fail if no sha256 tool found (env: `OPERATOR_STRICT_CHECKSUM=true`) |
+| `--verify-sig` | Verify GPG signature of the downloaded profile (env: `OPERATOR_VERIFY_SIG=true`) |
+
+### List available profiles
+
+```bash
+make list
+```
+
+```bash
+./operator.sh plugin list      # includes plugin + local profiles
+```
+
+### Show current mode
 
 ```bash
 make current
-cat .claude_mode           # elite@v1.0.0:backup
 ```
 
-### Profil listesi
+### Self-update to latest release
 
 ```bash
-make list                  # core profiller
-./operator.sh plugin list  # core + plugin + local
+./operator.sh update
 ```
+
+```bash
+make update
+```
+
+```bash
+claude-operator update         # after global install
+```
+
+Queries the GitHub Releases API, compares the current version, downloads the new binary, verifies its SHA256
+checksum (and GPG signature if `--verify-sig` is set), and atomically replaces itself. No manual steps required.
 
 ---
 
-## 🛡 Conflict Detection
+## 🔌 Plugin Architecture
 
-Mevcut bir projeye `claude-operator` entegre ederken ya da `CLAUDE.md` dosyası zaten varken ne olur?
+Any GitHub repository that contains a `profiles/` directory with `.md` files can be used as a plugin registry.
 
-### Karar ağacı
-
-```
-CLAUDE.md var mı?
-│
-├── YOK → direkt yaz (normal akış)
-│
-└── VAR
-    ├── Operator tarafından mı yönetiliyor?
-    │   ├── EVET (sentinel header veya .claude_mode dosyası var)
-    │   │   └── --merge flag'i var mı?
-    │   │       ├── EVET → sentinel bloğunu güncelle, proje içeriğine dokunma
-    │   │       └── HAYIR → direkt üzerine yaz
-    │   │
-    │   └── HAYIR (unmanaged, el yazısı proje dosyası)
-    │       ├── TTY yok (CI/pipe) → sessiz backup, sonra üzerine yaz
-    │       ├── CLAUDE_OPERATOR_CONFLICT env var → direkt uygula
-    │       └── TTY var → interactive prompt
-```
-
-### Interactive prompt
-
-```
-Warning: CLAUDE.md exists and is not managed by claude-operator.
-
-  [b] Backup & overwrite  — save to .claude_backup/, apply profile  (default)
-  [m] Merge               — keep project content, append profile below
-  [o] Overwrite           — replace entirely (current content will be lost)
-  [a] Abort               — do nothing
-
-Choice [b/m/o/a] (default: b, auto-selects in 10s):
-```
-
-10 saniye içinde seçim yapılmazsa otomatik olarak **backup** seçilir.
-
-### Backup & restore
-
-```bash
-# Backup alarak uygula (non-interactive, CI için)
-./operator.sh --backup elite v1.0.0
-make claude MODE=elite VERSION=v1.0.0 CONFLICT=backup
-
-# Yedekleri listele
-./operator.sh restore --list
-make restore-list
-
-# Son yedeğe dön
-./operator.sh restore
-make restore
-
-# Belirli bir yedeğe dön
-./operator.sh restore 20260224T103000Z
-```
-
-Yedekler `.claude_backup/CLAUDE.md.<timestamp>` formatında saklanır. Maksimum 5 yedek tutulur, eskisi otomatik silinir. `.gitignore`'a otomatik eklenir.
-
-### Composition (--merge)
-
-Proje talimatlarını **korurken** operator profilini `CLAUDE.md`'ye ekler.
-
-```bash
-./operator.sh --merge elite v1.0.0
-make claude MODE=elite CONFLICT=merge
-```
-
-**İlk uygulamada** sentinel bloğu mevcut içeriğin altına eklenir:
-
-```markdown
-# Proje talimatları
-Bu proje bir TypeScript monorepo'dur. Tüm değişiklikler...
-
----
-
-<!-- claude-operator:begin elite@v1.0.0 -->
-[elite.md içeriği]
-<!-- claude-operator:end -->
-```
-
-**Sonraki uygulamalarda** sadece sentinel arasındaki operatör bölümü güncellenir — proje içeriğine hiç dokunulmaz. Idempotent'tir.
-
-### Sentinel restore
-
-`--merge` ile yazılmış bir `CLAUDE.md`'den operatör bölümünü kaldırıp proje içeriğini geri almak:
-
-```bash
-./operator.sh restore     # sentinel bloğunu siler, proje içeriği kalır
-```
-
-Hem sentinel hem backup varsa hangi yöntemle restore edileceği sorulur:
-
-```
-Both a sentinel section and a backup are available.
-
-  [s] Remove sentinel   — keep project content, strip operator section
-  [b] From backup       — restore last backup
-  [a] Abort
-```
-
-### `.claude_mode` format
-
-```
-elite@v1.0.0:overwrite     # direkt üzerine yazıldı
-elite@v1.0.0:backup        # backup alınarak yazıldı
-elite@v1.0.0:merge         # sentinel ile composition
-```
-
-### CI ortamları için
-
-```bash
-# Env var ile prompt atla
-CLAUDE_OPERATOR_CONFLICT=backup ./operator.sh elite v1.0.0
-CLAUDE_OPERATOR_CONFLICT=force  ./operator.sh elite v1.0.0
-CLAUDE_OPERATOR_CONFLICT=merge  ./operator.sh elite v1.0.0
-```
-
----
-
-## 🔌 Plugin Mimarisi
-
-`profiles/*.md` dizinine sahip herhangi bir GitHub reposu plugin registry olarak kullanılabilir.
-
-### Registry ekleme
+### Add a plugin registry
 
 ```bash
 ./operator.sh plugin add myorg/my-profiles
-./operator.sh plugin add myorg/my-profiles v1.0.0   # sürüm pinli + checksum
+./operator.sh plugin add myorg/my-profiles v1.0.0   # pinned + checksum verified
 
 make plugin-add REGISTRY=myorg/my-profiles
 make plugin-add REGISTRY=myorg/my-profiles VERSION=v1.0.0
 ```
 
-### Profil çözümleme sırası
-
-```
-1. ./claude-operator-plugins/<mod>.md      (proje-local, network yok)
-2. ~/.config/claude-operator/plugins/...   (cache'li plugin profilleri)
-3. github.com/PsyChaos/claude-operator     (core uzak profiller)
-```
-
-### Tüm profilleri listele
+### List all available profiles (core + plugins + local)
 
 ```bash
 ./operator.sh plugin list
+make plugin-list
 ```
 
+Output:
 ```
 Core profiles (PsyChaos/claude-operator):
   elite
@@ -369,29 +237,43 @@ Local (./claude-operator-plugins/):
   custom-mode
 ```
 
-### Plugin yönetimi
+### Remove a plugin registry
 
 ```bash
-./operator.sh plugin remove myorg/my-profiles      # kaldır
-./operator.sh plugin update                        # tümünü güncelle
-./operator.sh plugin update myorg/my-profiles      # tekini güncelle
-
+./operator.sh plugin remove myorg/my-profiles
 make plugin-remove REGISTRY=myorg/my-profiles
+```
+
+### Update plugin profiles
+
+```bash
+./operator.sh plugin update                    # update all
+./operator.sh plugin update myorg/my-profiles  # update specific
+
 make plugin-update
 make plugin-update REGISTRY=myorg/my-profiles
 ```
 
-### Local profil override
+### Local profile override
+
+Place `.md` files in `./claude-operator-plugins/` in your project directory. These take precedence over
+plugin cache and core remote profiles — no network required.
 
 ```bash
 mkdir -p claude-operator-plugins
-cp my-mode.md claude-operator-plugins/
-./operator.sh my-mode          # local dosyayı kullanır, network yok
+cp my-custom-mode.md claude-operator-plugins/
+./operator.sh my-custom-mode   # uses local file
 ```
 
-### Plugin manifest (opsiyonel)
+### Profile resolution order
 
-Plugin reposunun kök dizininde `plugin.json` varsa okunur:
+1. `./claude-operator-plugins/<mode>.md` — project-local (no network)
+2. `~/.config/claude-operator/plugins/<registry>/<mode>.md` — cached plugin profiles
+3. `https://raw.githubusercontent.com/PsyChaos/claude-operator/...` — core remote profiles
+
+### Plugin manifest (optional)
+
+Plugin repos can include a `plugin.json` at their root to provide metadata:
 
 ```json
 {
@@ -401,117 +283,128 @@ Plugin reposunun kök dizininde `plugin.json` varsa okunur:
 }
 ```
 
-**Depolama:**
-- Cache: `~/.config/claude-operator/plugins/<owner>__<repo>/`
-- Registry listesi: `~/.config/claude-operator/registries.conf`
+Plugin cache is stored at `~/.config/claude-operator/plugins/`.
+Registry list is stored at `~/.config/claude-operator/registries.conf`.
 
 ---
 
-## 🔒 Güvenlik
+## 🌐 Remote Profile Source
 
-### SHA256 checksum doğrulama
+Profiles are fetched from:
 
-CI her release'de şu dosyalar için `.sha256` sidecar dosyaları üretir ve release asset'lerine ekler:
+```
+https://raw.githubusercontent.com/PsyChaos/claude-operator/<ref>/profiles/
+```
 
-- `operator.sh.sha256`
-- `install.sh.sha256`
-- `profiles/elite.md.sha256`, `profiles/high-autonomy.md.sha256`, `profiles/senior-production.md.sha256`
+When a `VERSION` is supplied, profiles are fetched from that release tag's ref, ensuring the profile content
+matches exactly what was shipped with that version. A SHA256 sidecar checksum is also fetched and verified.
 
-`--version` ile kurulumda checksum otomatik indirilir ve doğrulanır. Uyuşmazlıkta kurulum durur, temp dosyalar temizlenir.
+---
 
-Sürüm pinli profile fetch'lerde de SHA256 doğrulanır.
+## 🔒 Security
 
-`--strict-checksum` ile sha256 tool (sha256sum/shasum) yoksa abort eder. Varsayılan: uyarı ver ve devam et.
+### Checksum verification
 
-### GPG imza doğrulama
+Release assets (`operator.sh`, `install.sh`, `profiles/*.md`) are accompanied by SHA256 checksum sidecar files
+generated by CI and attached to every GitHub Release.
 
-Tüm release asset'leri (`operator.sh`, `install.sh`, `profiles/*.md`) CI bot key ile GPG imzalanır. Her release'e `.sig` dosyaları eklenir.
+When installing with `--version`, checksums are fetched and verified before any file is written to disk.
+A mismatch aborts the install and removes all temporary files.
 
-**Başlarken:**
+Profile downloads are also written to a temp file first and atomically moved to `CLAUDE.md` only after
+verification passes — no partial writes.
+
+Use `--strict-checksum` to treat a missing sha256 tool as a hard error instead of a warning.
+
+### GPG signature verification
+
+Every release asset is signed with a GPG detached signature (`.sig` file) by the CI bot key. The public
+key is distributed at `claude-operator.gpg.pub` in this repository.
+
+To trust the key and verify future downloads:
 
 ```bash
-# Public key'i indir ve keyring'e import et
+# Import the public key
 ./operator.sh trust-key
 
-# Artık imza doğrulamayla kullan
+# Then verify on any subsequent operation
 ./operator.sh --verify-sig elite v1.0.0
 ./operator.sh --verify-sig update
 ```
 
-**Key bilgileri:**
-- UID: `Claude Operator <psychaos@gmail.com>`
-- Public key: `claude-operator.gpg.pub` (repo kökü)
-- Local cache: `~/.config/claude-operator/claude-operator.gpg.pub`
+The `trust-key` command downloads the public key from the repository and imports it into your local GPG keyring.
 
-### Önerilen kurulum sırası
+**Key details:**
+- **UID:** `Claude Operator <psychaos@gmail.com>`
+- **Key file:** `claude-operator.gpg.pub` (repo root)
+- **Config path:** `~/.config/claude-operator/claude-operator.gpg.pub`
 
-```bash
-# 1. Key'e güven
-./operator.sh trust-key
+### Supply-chain recommendations
 
-# 2. Sürüm pinli + SHA256 + GPG ile profil uygula
-./operator.sh --verify-sig elite v1.0.0
-
-# 3. Güncellemeleri de imzalı al
-./operator.sh --verify-sig update
-```
+Pinned installs with signature verification are strongly recommended for:
+* Team environments where reproducibility matters
+* CI/CD pipelines that pull `operator.sh` as a dependency
+* Any environment where supply-chain integrity is a concern
+* Enterprise environments (see Enterprise Mode below)
 
 ---
 
 ## 🏢 Enterprise Mode
 
-### Config oluşturma
+Enterprise mode enables policy enforcement, audit logging, and air-gapped operation.
+
+### Generate config template
 
 ```bash
 bash install.sh --enterprise
 make enterprise-config
 
-# Özel path
+# Custom path
 bash install.sh --enterprise --enterprise-config /etc/claude-operator/enterprise.conf
 make enterprise-config ENTERPRISE_CONFIG=/etc/claude-operator/enterprise.conf
 ```
 
-### Config yükleme sırası (yüksek öncelik en sonda)
+This writes a fully-commented template to `~/.config/claude-operator/enterprise.conf`.
 
-```
-1. /etc/claude-operator/enterprise.conf     (sistem geneli)
-2. ~/.config/claude-operator/enterprise.conf (kullanıcı)
-3. CO_* ortam değişkenleri                  (en yüksek öncelik)
-```
+### Configuration
 
-### Tüm direktifler
+The config file is shell-sourceable (`KEY=value` syntax). Config is loaded in priority order:
+
+1. `/etc/claude-operator/enterprise.conf` (system-wide)
+2. `~/.config/claude-operator/enterprise.conf` (user-level)
+3. `CO_*` environment variables (highest priority)
 
 ```bash
-# Enterprise mode'u etkinleştir (aşağıdaki tüm politikaları aktive eder)
+# Enable enterprise mode (activates all policies below)
 ENTERPRISE_MODE=true
 
-# İzin verilen profiller (boşlukla ayrılmış). Boş = hepsi izinli.
+# Whitelist of allowed profiles (space-separated). Empty = all allowed.
 ALLOWED_PROFILES="elite senior-production"
 
-# Sürüm zorunluluğu — versiyonsuz çalıştırmayı engeller
+# Require version pinning — reject: ./operator.sh elite (without a version tag)
 REQUIRE_VERSION_PIN=true
 
-# SHA256 tool yoksa hard fail
+# Hard fail if no sha256 tool found
 REQUIRE_CHECKSUM=true
 
-# GPG imza doğrulamayı zorunlu kıl
+# Require GPG signature verification on all downloads
 REQUIRE_SIGNATURE=true
 
-# Audit log (append-only, ISO8601)
+# Audit log (append-only, ISO8601 timestamps)
 AUDIT_LOG=/var/log/claude-operator.log
 
-# İç mirror URL (GitHub yerine)
-# Profiles: <URL>/profiles/<mod>.md formatında serve etmeli
+# Custom internal profile registry (replaces GitHub)
+# Must serve profiles at: <URL>/profiles/<mode>.md
 PROFILE_REGISTRY_URL=https://internal.corp/claude-profiles
 
-# Güncelleme politikası: "auto" (varsayılan) veya "manual"
+# Block self-updates (require manual intervention)
 UPDATE_POLICY=manual
 
-# Offline mod — sadece cache'den serve et
+# Offline mode — serve from local cache only, no network
 OFFLINE_MODE=false
 ```
 
-### Aktif konfigürasyonu göster
+### Inspect active configuration
 
 ```bash
 ./operator.sh enterprise-status
@@ -520,188 +413,94 @@ make enterprise-status
 
 ### Audit log
 
+When `AUDIT_LOG` is set, every operation is logged:
+
 ```
 [2026-02-24T10:30:00Z] user=alice mode=elite version=v1.0.0 outcome=success
 [2026-02-24T10:31:05Z] user=bob mode=fast version=unset outcome=failed message=version_pin_required
-[2026-02-24T10:32:10Z] user=charlie mode=elite version=v1.0.0 outcome=failed message=profile_not_allowed=fast
 ```
 
 ```bash
 make audit-log
 ```
 
-### Profile cache
+### Local profile cache
 
-Her başarılı fetch sonrası profil `~/.config/claude-operator/cache/<mod>@<ref>.md` olarak cache'lenir.
+Profiles are cached at `~/.config/claude-operator/cache/<mode>@<ref>.md` after every successful fetch.
+With `OFFLINE_MODE=true`, profiles are served from cache and no network requests are made.
 
-`OFFLINE_MODE=true` ile network çağrısı yapılmaz, sadece cache kullanılır.
+### Environment variable overrides
 
-### CI ortam değişkenleri
+All enterprise policies can be set via environment variables (useful for CI):
 
-| Değişken | Örnek | Açıklama |
-|---|---|---|
-| `CO_ENTERPRISE_MODE` | `true` | Enterprise mode'u aktive et |
-| `CO_ALLOWED_PROFILES` | `"elite senior-production"` | İzin verilen profiller |
-| `CO_REQUIRE_VERSION_PIN` | `true` | Sürüm zorunluluğu |
-| `CO_REQUIRE_CHECKSUM` | `true` | SHA256 zorunluluğu |
-| `CO_REQUIRE_SIGNATURE` | `true` | GPG imza zorunluluğu |
-| `CO_AUDIT_LOG` | `/var/log/co.log` | Audit log dosyası |
-| `CO_PROFILE_REGISTRY_URL` | `https://corp/profiles` | İç mirror |
-| `CO_UPDATE_POLICY` | `manual` | Güncelleme politikası |
-| `CO_OFFLINE_MODE` | `true` | Offline mod |
-
----
-
-## 🔄 Self-Update
-
-```bash
-./operator.sh update
-make update
-claude-operator update     # global kurulum sonrası
-```
-
-Akış:
-1. GitHub Releases API'den en son tag'i çeker (jq gerekmez)
-2. Mevcut `OPERATOR_VERSION` ile karşılaştırır
-3. Yeni `operator.sh` + `.sha256` indirir
-4. SHA256 doğrular
-5. `--verify-sig` ile GPG imzasını doğrular
-6. `mv` ile atomik olarak kendini günceller
-
----
-
-## 📋 Referans
-
-### Tüm komutlar
-
-```bash
-# Profil geçişi
-./operator.sh <mod> [versiyon]
-./operator.sh --merge <mod> [versiyon]
-./operator.sh --backup <mod> [versiyon]
-./operator.sh --force <mod> [versiyon]
-
-# Geri yükleme
-./operator.sh restore
-./operator.sh restore --list
-./operator.sh restore <timestamp>
-
-# Plugin yönetimi
-./operator.sh plugin add <owner/repo> [versiyon]
-./operator.sh plugin list
-./operator.sh plugin remove <owner/repo>
-./operator.sh plugin update [<owner/repo>]
-
-# Güvenlik
-./operator.sh trust-key
-./operator.sh --verify-sig <mod> [versiyon]
-
-# Güncelleme
-./operator.sh update
-
-# Enterprise
-./operator.sh enterprise-status
-
-# Yardım
-./operator.sh
-```
-
-### Tüm Makefile target'ları
-
-```bash
-make claude MODE=<profil> [VERSION=<tag>] [CONFLICT=merge|backup|force]
-make list
-make current
-make update
-make restore
-make restore-list
-make install-global
-make plugin-add REGISTRY=<owner/repo> [VERSION=<tag>]
-make plugin-list
-make plugin-remove REGISTRY=<owner/repo>
-make plugin-update [REGISTRY=<owner/repo>]
-make enterprise-config [ENTERPRISE_CONFIG=<path>]
-make enterprise-status
-make audit-log
-make help
-```
-
-### Önemli dosya ve dizinler
-
-| Yol | Açıklama |
+| Variable | Example |
 |---|---|
-| `./CLAUDE.md` | Aktif Claude konfigürasyonu (operator tarafından yönetilir) |
-| `./.claude_mode` | Aktif mod ve yazma yöntemi (`elite@v1.0.0:merge`) |
-| `./.claude_backup/` | Timestamp'li CLAUDE.md yedekleri (max 5) |
-| `./claude-operator-plugins/` | Proje-local profil override dizini |
-| `~/.config/claude-operator/` | Kullanıcı konfigürasyonu ve cache |
-| `~/.config/claude-operator/registries.conf` | Kayıtlı plugin registry'leri |
-| `~/.config/claude-operator/plugins/` | İndirilen plugin profilleri |
-| `~/.config/claude-operator/cache/` | Profile cache (offline mode için) |
-| `~/.config/claude-operator/enterprise.conf` | Kullanıcı enterprise konfigürasyonu |
-| `/etc/claude-operator/enterprise.conf` | Sistem geneli enterprise konfigürasyonu |
+| `CO_ENTERPRISE_MODE` | `true` |
+| `CO_ALLOWED_PROFILES` | `"elite senior-production"` |
+| `CO_REQUIRE_VERSION_PIN` | `true` |
+| `CO_REQUIRE_CHECKSUM` | `true` |
+| `CO_REQUIRE_SIGNATURE` | `true` |
+| `CO_AUDIT_LOG` | `/var/log/claude-operator.log` |
+| `CO_PROFILE_REGISTRY_URL` | `https://internal.corp/claude-profiles` |
+| `CO_UPDATE_POLICY` | `manual` |
+| `CO_OFFLINE_MODE` | `true` |
 
-### .gitignore
+---
 
-`claude-operator` aşağıdaki satırları `.gitignore`'a otomatik ekler (yoksa):
+## 🏷 Versioning
+
+This project follows **Semantic Versioning**.
 
 ```
-CLAUDE.md
-.claude_mode
-.claude_backup/
+vMAJOR.MINOR.PATCH
 ```
 
----
+| Bump | Reason |
+|------|--------|
+| MAJOR | Breaking behavioral change |
+| MINOR | New profile or feature |
+| PATCH | Fixes / documentation updates |
 
-## 🏷 Versiyonlama
-
-Proje **Semantic Versioning** kullanır.
-
-| Bump | Neden |
-|------|-------|
-| MAJOR | Breaking davranış değişikliği |
-| MINOR | Yeni profil veya özellik |
-| PATCH | Düzeltme / dokümantasyon güncellemesi |
+Initial release: `v1.0.0`
 
 ---
 
-## 🧪 Felsefe
+## 🧪 Philosophy
 
-Claude konfigürasyonu bir altyapı bileşenidir.
+Claude configuration is infrastructure.
 
-Tıpkı Dockerfile, terraform state veya CI pipeline gibi:
+It should be:
 
-- **Versioned** — hangi davranışın ne zaman etkin olduğu izlenebilir
-- **Explicit** — varsayılan değil, bilinçli seçim
-- **Reproducible** — aynı versiyon, aynı davranış — her ortamda, her zaman
-- **Intentional** — her profil geçişi bir karardır, bir kaza değil
-
----
-
-## 🤝 Katkı
-
-### Yeni profil eklerken
-
-- Mevcut profillerin yapısal tutarlılığını koru
-- Davranış felsefesini açıkça belgele
-- README'yi güncelle
-- MINOR versiyon çıkar
-
-### Yeni özellik eklerken
-
-- Dependency-free kal: bash + curl + POSIX araçları
-- Makefile target ekle
-- `--help` çıktısını ve README referans bölümünü güncelle
-- `bash -n` ile syntax doğrula
+* Versioned
+* Explicit
+* Reproducible
+* Intentional
 
 ---
 
-## 📜 Lisans
+## 🤝 Contributing
+
+If adding a new profile:
+
+* Keep structural consistency
+* Document behavioral philosophy clearly
+* Update README
+* Bump MINOR version
+
+If adding a new feature:
+
+* Keep it dependency-free (bash + curl + standard POSIX tools only)
+* Add corresponding Makefile target
+* Update the install flags table and usage sections in README
+
+---
+
+## 📜 License
 
 MIT
 
 ---
 
-## 👤 Yazar
+## 👤 Author
 
 PsyChaos
