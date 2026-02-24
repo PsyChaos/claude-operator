@@ -24,7 +24,7 @@ MODE_FILE="$(pwd)/.claude_mode"
 # ─── Strict checksum flag ─────────────────────────────────────────────────────
 
 STRICT_CHECKSUM=false
-[[ "${OPERATOR_STRICT_CHECKSUM:-false}" == "true" ]] && STRICT_CHECKSUM=true
+[[ "${OPERATOR_STRICT_CHECKSUM:-false}" == "true" ]] && STRICT_CHECKSUM=true || true
 
 # ─── Plugin config dirs ───────────────────────────────────────────────────────
 
@@ -36,7 +36,7 @@ LOCAL_PLUGINS_DIR="$(pwd)/claude-operator-plugins"
 # ─── Signature verification flag ──────────────────────────────────────────────
 
 VERIFY_SIG=false
-[[ "${OPERATOR_VERIFY_SIG:-false}" == "true" ]] && VERIFY_SIG=true
+[[ "${OPERATOR_VERIFY_SIG:-false}" == "true" ]] && VERIFY_SIG=true || true
 
 # ─── Enterprise ───────────────────────────────────────────────────────────────
 
@@ -567,15 +567,16 @@ _load_enterprise_config() {
   fi
 
   # Env vars override config files
-  [[ -n "${CO_ENTERPRISE_MODE:-}" ]]       && ENTERPRISE_MODE="$CO_ENTERPRISE_MODE"
-  [[ -n "${CO_ALLOWED_PROFILES:-}" ]]      && ALLOWED_PROFILES="$CO_ALLOWED_PROFILES"
-  [[ -n "${CO_REQUIRE_VERSION_PIN:-}" ]]   && REQUIRE_VERSION_PIN="$CO_REQUIRE_VERSION_PIN"
-  [[ -n "${CO_REQUIRE_CHECKSUM:-}" ]]      && REQUIRE_CHECKSUM="$CO_REQUIRE_CHECKSUM"
-  [[ -n "${CO_REQUIRE_SIGNATURE:-}" ]]     && REQUIRE_SIGNATURE="$CO_REQUIRE_SIGNATURE"
-  [[ -n "${CO_AUDIT_LOG:-}" ]]             && AUDIT_LOG="$CO_AUDIT_LOG"
-  [[ -n "${CO_PROFILE_REGISTRY_URL:-}" ]]  && PROFILE_REGISTRY_URL="$CO_PROFILE_REGISTRY_URL"
-  [[ -n "${CO_UPDATE_POLICY:-}" ]]         && UPDATE_POLICY="$CO_UPDATE_POLICY"
-  [[ -n "${CO_OFFLINE_MODE:-}" ]]          && OFFLINE_MODE="$CO_OFFLINE_MODE"
+  [[ -n "${CO_ENTERPRISE_MODE:-}" ]]       && ENTERPRISE_MODE="$CO_ENTERPRISE_MODE"       || true
+  [[ -n "${CO_ALLOWED_PROFILES:-}" ]]      && ALLOWED_PROFILES="$CO_ALLOWED_PROFILES"      || true
+  [[ -n "${CO_REQUIRE_VERSION_PIN:-}" ]]   && REQUIRE_VERSION_PIN="$CO_REQUIRE_VERSION_PIN" || true
+  [[ -n "${CO_REQUIRE_CHECKSUM:-}" ]]      && REQUIRE_CHECKSUM="$CO_REQUIRE_CHECKSUM"      || true
+  [[ -n "${CO_REQUIRE_SIGNATURE:-}" ]]     && REQUIRE_SIGNATURE="$CO_REQUIRE_SIGNATURE"    || true
+  [[ -n "${CO_AUDIT_LOG:-}" ]]             && AUDIT_LOG="$CO_AUDIT_LOG"                    || true
+  [[ -n "${CO_PROFILE_REGISTRY_URL:-}" ]]  && PROFILE_REGISTRY_URL="$CO_PROFILE_REGISTRY_URL" || true
+  [[ -n "${CO_UPDATE_POLICY:-}" ]]         && UPDATE_POLICY="$CO_UPDATE_POLICY"            || true
+  [[ -n "${CO_OFFLINE_MODE:-}" ]]          && OFFLINE_MODE="$CO_OFFLINE_MODE"              || true
+  return 0
 }
 
 # ─── Audit logger ─────────────────────────────────────────────────────────────
