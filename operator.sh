@@ -99,7 +99,45 @@ while [[ "${1:-}" == --* ]]; do
 done
 
 MODE="${1:-}"
-VERSION="${2:-}"
+shift || true
+
+# Parse remaining args: flags can appear after MODE, VERSION is the first non-flag
+VERSION=""
+while [[ $# -gt 0 ]]; do
+  case "${1:-}" in
+    --strict-checksum)
+      STRICT_CHECKSUM=true
+      shift
+      ;;
+    --verify-sig)
+      VERIFY_SIG=true
+      shift
+      ;;
+    --force)
+      CONFLICT_MODE="force"
+      shift
+      ;;
+    --backup)
+      CONFLICT_MODE="backup"
+      shift
+      ;;
+    --merge)
+      CONFLICT_MODE="merge"
+      shift
+      ;;
+    --*)
+      # Unknown flag — ignore and continue
+      shift
+      ;;
+    *)
+      # First non-flag positional after MODE is VERSION
+      if [[ -z "$VERSION" ]]; then
+        VERSION="$1"
+      fi
+      shift
+      ;;
+  esac
+done
 
 if [ -z "$MODE" ]; then
   echo "Usage: ./operator.sh [flags] <mode> [version]"
