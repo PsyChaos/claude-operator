@@ -15,6 +15,9 @@ RAW_BASE="https://raw.githubusercontent.com/$REPO/$BRANCH"
 RELEASES_BASE="https://github.com/$REPO/releases/download"
 API_BASE="https://api.github.com/repos/$REPO"
 
+GPG_KEY_FILE="$HOME/.config/claude-operator/claude-operator.gpg.pub"
+GPG_KEY_URL="https://raw.githubusercontent.com/$REPO/$BRANCH/claude-operator.gpg.pub"
+
 TARGET_FILE="$(pwd)/CLAUDE.md"
 MODE_FILE="$(pwd)/.claude_mode"
 
@@ -30,31 +33,50 @@ PLUGINS_DIR="$CONFIG_DIR/plugins"
 REGISTRIES_FILE="$CONFIG_DIR/registries.conf"
 LOCAL_PLUGINS_DIR="$(pwd)/claude-operator-plugins"
 
+# ─── Signature verification flag ──────────────────────────────────────────────
+
+VERIFY_SIG=false
+[[ "${OPERATOR_VERIFY_SIG:-false}" == "true" ]] && VERIFY_SIG=true
+
 # ─── Argument parsing ─────────────────────────────────────────────────────────
 
-if [[ "${1:-}" == "--strict-checksum" ]]; then
-  STRICT_CHECKSUM=true
-  shift
-fi
+while [[ "${1:-}" == --* ]]; do
+  case "${1:-}" in
+    --strict-checksum)
+      STRICT_CHECKSUM=true
+      shift
+      ;;
+    --verify-sig)
+      VERIFY_SIG=true
+      shift
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
 
 MODE="${1:-}"
 VERSION="${2:-}"
 
 if [ -z "$MODE" ]; then
-  echo "Usage: ./operator.sh [--strict-checksum] <mode> [version]"
+  echo "Usage: ./operator.sh [--strict-checksum] [--verify-sig] <mode> [version]"
   echo "       ./operator.sh update"
   echo "       ./operator.sh plugin <add|list|remove|update> [registry] [version]"
+  echo "       ./operator.sh trust-key"
   echo ""
   echo "Examples:"
   echo "  ./operator.sh elite"
   echo "  ./operator.sh elite v1.0.0"
   echo "  ./operator.sh --strict-checksum elite v1.0.0"
+  echo "  ./operator.sh --verify-sig elite v1.0.0"
   echo "  ./operator.sh update"
   echo "  ./operator.sh plugin add myorg/my-profiles"
   echo "  ./operator.sh plugin add myorg/my-profiles v1.0.0"
   echo "  ./operator.sh plugin list"
   echo "  ./operator.sh plugin remove myorg/my-profiles"
   echo "  ./operator.sh plugin update"
+  echo "  ./operator.sh trust-key"
   exit 1
 fi
 
@@ -102,6 +124,49 @@ _verify_checksum() {
     echo "  ✗ Checksum mismatch!"
     echo "    Expected: $expected_hash"
     echo "    Got:      $actual_hash"
+    return 1
+  fi
+}
+
+# ─── GPG helpers ─────────────────────────────────────────────────────────────
+
+_ensure_gpg() {
+  if ! command -v gpg >/dev/null 2>&1; then
+    echo "Error: gpg is required for signature verification but not installed."
+    echo "Install gpg (e.g. apt install gnupg) or omit --verify-sig."
+    exit 1
+  fi
+}
+
+_import_trust_key() {
+  local key_file="${1:-$GPG_KEY_FILE}"
+  _ensure_gpg
+  if [[ ! -f "$key_file" ]]; then
+    echo "Error: Public key not found at $key_file"
+    echo "Run: ./operator.sh trust-key"
+    exit 1
+  fi
+  gpg --import "$key_file" 2>/dev/null || {
+    echo "Error: Failed to import GPG key from $key_file"
+    exit 1
+  }
+  echo "  ✓ GPG key imported from $key_file"
+}
+
+_verify_signature() {
+  local file="$1"
+  local sig_file="$2"
+  _ensure_gpg
+  if [[ ! -f "$sig_file" ]]; then
+    echo "Error: Signature file not found: $sig_file"
+    exit 1
+  fi
+  if gpg --verify "$sig_file" "$file" 2>/dev/null; then
+    echo "  ✓ GPG signature verified: $(basename "$file")"
+    return 0
+  else
+    echo "  ✗ GPG signature verification FAILED: $(basename "$file")"
+    echo "    This file may have been tampered with!"
     return 1
   fi
 }
@@ -175,6 +240,26 @@ _do_update() {
   fi
 
   rm -f "$tmp_sha"
+
+  if [[ "$VERIFY_SIG" == "true" ]]; then
+    local tmp_sig
+    tmp_sig="$(mktemp /tmp/claude-operator-sig-XXXXXX)"
+    local sig_url="$RELEASES_BASE/$latest_tag/operator.sh.sig"
+    echo "  Fetching GPG signature..."
+    curl -fsSL "$sig_url" -o "$tmp_sig" || {
+      rm -f "$tmp_new" "$tmp_sig"
+      echo "  Error: Failed to download signature from $sig_url"
+      exit 1
+    }
+    _import_trust_key
+    if ! _verify_signature "$tmp_new" "$tmp_sig"; then
+      rm -f "$tmp_new" "$tmp_sig"
+      echo "  Aborting update due to signature verification failure."
+      exit 1
+    fi
+    rm -f "$tmp_sig"
+  fi
+
   chmod +x "$tmp_new"
 
   # Atomic replace — mv is atomic on same filesystem
@@ -530,6 +615,26 @@ if [[ "$MODE" == "plugin" ]]; then
   exit 0
 fi
 
+# ─── Trust-key branch ─────────────────────────────────────────────────────────
+
+if [[ "$MODE" == "trust-key" ]]; then
+  _ensure_gpg
+  echo "Fetching claude-operator public GPG key..."
+  mkdir -p "$(dirname "$GPG_KEY_FILE")"
+  curl -fsSL "$GPG_KEY_URL" -o "$GPG_KEY_FILE" || {
+    echo "Error: Failed to download public key from $GPG_KEY_URL"
+    exit 1
+  }
+  echo "  Downloaded to: $GPG_KEY_FILE"
+  _import_trust_key "$GPG_KEY_FILE"
+  echo ""
+  echo "========================================"
+  echo " claude-operator GPG key trusted"
+  echo " You can now use --verify-sig"
+  echo "========================================"
+  exit 0
+fi
+
 # ─── Profile fetch ────────────────────────────────────────────────────────────
 
 _do_fetch_profile() {
@@ -578,6 +683,25 @@ _do_fetch_profile() {
     fi
 
     rm -f "$tmp_sha"
+
+    if [[ "$VERIFY_SIG" == "true" ]]; then
+      local tmp_profile_sig
+      tmp_profile_sig="$(mktemp /tmp/claude-operator-profile-sig-XXXXXX)"
+      local profile_sig_url="$RELEASES_BASE/$VERSION/profiles/$MODE.md.sig"
+      echo "  Fetching profile GPG signature..."
+      curl -fsSL "$profile_sig_url" -o "$tmp_profile_sig" || {
+        rm -f "$tmp_profile" "$tmp_profile_sig"
+        echo "  Error: Failed to download profile signature from $profile_sig_url"
+        exit 1
+      }
+      _import_trust_key
+      if ! _verify_signature "$tmp_profile" "$tmp_profile_sig"; then
+        rm -f "$tmp_profile" "$tmp_profile_sig"
+        echo "  Aborting profile fetch due to signature verification failure."
+        exit 1
+      fi
+      rm -f "$tmp_profile_sig"
+    fi
   else
     # Master branch fetch — no sidecar checksum available
     echo "  Note: Fetching from master branch. No checksum sidecar available."

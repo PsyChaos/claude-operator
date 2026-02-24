@@ -43,6 +43,13 @@ jobs:
           grep "OPERATOR_VERSION=" operator.sh
           echo "✅ Version stamped: $TAG_NAME"
 
+      - name: Import GPG signing key
+        run: |
+          echo "${{ secrets.SIGNING_KEY }}" | base64 -d | gpg --batch --import
+          GPG_KEY_ID=$(gpg --list-secret-keys --keyid-format LONG | grep sec | awk '{print $2}' | cut -d'/' -f2 | head -1)
+          echo "GPG_KEY_ID=$GPG_KEY_ID" >> $GITHUB_ENV
+          echo "Signing key imported: $GPG_KEY_ID"
+
       - name: Generate checksums
         run: |
           sha256sum operator.sh > operator.sh.sha256
@@ -51,6 +58,15 @@ jobs:
           for f in profiles/*.md; do
             sha256sum "$f" > "$f.sha256"
           done
+
+      - name: Generate GPG signatures
+        run: |
+          gpg --batch --yes --detach-sign --armor --local-user "$GPG_KEY_ID" operator.sh
+          gpg --batch --yes --detach-sign --armor --local-user "$GPG_KEY_ID" install.sh
+          for f in profiles/*.md; do
+            gpg --batch --yes --detach-sign --armor --local-user "$GPG_KEY_ID" "$f"
+          done
+          echo "✅ Signatures generated"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -61,8 +77,14 @@ jobs:
             install.sh
             operator.sh.sha256
             install.sh.sha256
+            operator.sh.sig
+            install.sh.sig
             profiles/elite.md.sha256
             profiles/high-autonomy.md.sha256
             profiles/senior-production.md.sha256
+            profiles/elite.md.sig
+            profiles/high-autonomy.md.sig
+            profiles/senior-production.md.sig
+            claude-operator.gpg.pub
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
